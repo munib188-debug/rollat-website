@@ -57,9 +57,9 @@ export default function QualifiedWallets() {
               Qualified <span className="text-white/40">Wallets.</span>
             </h2>
             <div className="flex items-center gap-3 mt-3 font-mono text-sm">
-              <span className="text-white/50">{total.toLocaleString()} wallets</span>
+              <span className="text-white/50">{(total ?? 0).toLocaleString()} wallets</span>
               <span className="text-white/20">·</span>
-              <span className="text-white/50">{total_tickets.toLocaleString()} total tickets</span>
+              <span className="text-white/50">{(total_tickets ?? 0).toLocaleString()} total tickets</span>
             </div>
           </div>
 
