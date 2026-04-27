@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Outfit', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #0A0D0B;
+  color: #FAFAFA;
+  overflow-x: hidden;
+}
+
+@layer base {
+  :root {
+    --background: 142 18% 4%;
+    --foreground: 0 0% 98%;
+    --card: 145 12% 9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 145 12% 9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 51 100% 50%;
+    --primary-foreground: 142 18% 4%;
+    --secondary: 145 14% 12%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 145 14% 12%;
+    --muted-foreground: 145 8% 65%;
+    --accent: 51 100% 50%;
+    --accent-foreground: 142 18% 4%;
+    --destructive: 346 100% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 145 10% 18%;
+    --input: 145 10% 18%;
+    --ring: 51 100% 50%;
+    --radius: 0.25rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Grain texture overlay */
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.06;
+  z-index: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* Roulette wheel */
+.roulette-wheel {
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      #1A221E 0deg 22.5deg,
+      #FF3366 22.5deg 45deg,
+      #1A221E 45deg 67.5deg,
+      #FFD700 67.5deg 90deg
+    );
+  position: relative;
+}
+
+.roulette-wheel::before {
+  content: "";
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255,215,0,0.18), transparent 55%),
+    radial-gradient(circle at 70% 70%, rgba(255,51,102,0.15), transparent 55%),
+    #121815;
+  border: 1px solid rgba(255,215,0,0.25);
+}
+
+.roulette-wheel::after {
+  content: "";
+  position: absolute;
+  inset: 38%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #FFD700 0%, #C9A227 60%, #0A0D0B 100%);
+  box-shadow: 0 0 40px rgba(255,215,0,0.4), inset 0 0 20px rgba(0,0,0,0.6);
+}
+
+.gold-text {
+  background: linear-gradient(180deg, #FFEA66 0%, #FFD700 50%, #C9A227 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.crimson-text {
+  background: linear-gradient(180deg, #FF668C 0%, #FF3366 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.glass {
+  background: rgba(18, 24, 21, 0.55);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 215, 0, 0.08);
+}
+
+.glow-gold {
+  box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.25), 0 0 32px rgba(255, 215, 0, 0.18);
+}
+
+.glow-crimson {
+  box-shadow: 0 0 0 1px rgba(255, 51, 102, 0.3), 0 0 32px rgba(255, 51, 102, 0.2);
+}
+
+/* Casino felt */
+.felt-bg {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255,215,0,0.06), transparent 60%),
+    radial-gradient(ellipse at 0% 100%, rgba(255,51,102,0.05), transparent 50%),
+    radial-gradient(ellipse at 100% 100%, rgba(0,255,163,0.04), transparent 50%),
+    #0A0D0B;
+}
+
+/* Hide scrollbar but allow scroll */
+.scrollbar-hidden::-webkit-scrollbar { display: none; }
+.scrollbar-hidden { scrollbar-width: none; }
+
+/* Selection */
+::selection {
+  background: #FFD700;
+  color: #0A0D0B;
+}
+
+/* Cursor accents on premium clickable */
+.cursor-bet {
+  cursor: pointer;
+}
+
+/* Winner flash: gold glow pulses 3× */
+@keyframes winner-flash {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); }
+  25%       { box-shadow: 0 0 80px 20px rgba(255, 215, 0, 0.7); }
+  50%       { box-shadow: 0 0 40px 8px rgba(255, 215, 0, 0.35); }
+  75%       { box-shadow: 0 0 80px 20px rgba(255, 215, 0, 0.5); }
+}
+.animate-winner-flash {
+  animation: winner-flash 1.4s ease-out 3;
+}
+
+/* Spin ring: faster glow during active spin */
+@keyframes spin-ring-active {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1.0; }
+}
+.animate-spin-ring-active {
+  animation: spin-ring-active 0.6s ease-in-out infinite;
+}
