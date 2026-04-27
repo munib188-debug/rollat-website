@@ -17,7 +17,8 @@ export default function HallOfFame() {
   const winners = useWinners(12);
   const { spinState } = useSpinPhase() || {};
   const phase = spinState?.phase || "idle";
-  const top3 = [...winners].sort((a, b) => b.amount_sol - a.amount_sol).slice(0, 3);
+  const safeWinners = Array.isArray(winners) ? winners : [];
+  const top3 = [...safeWinners].sort((a, b) => b.amount_sol - a.amount_sol).slice(0, 3);
 
   return (
     <section id="hall" className="relative py-24 md:py-32 px-6 md:px-12" data-testid="hall-of-fame-section">
@@ -62,7 +63,7 @@ export default function HallOfFame() {
             </div>
           )}
 
-          {winners.map((w, i) => {
+          {safeWinners.map((w, i) => {
             const odds = w.participants_count > 0
               ? `1/${w.participants_count}`
               : "—";

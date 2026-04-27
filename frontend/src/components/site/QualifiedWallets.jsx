@@ -133,7 +133,7 @@ export default function QualifiedWallets() {
 function GridView({ wallets, totalTickets }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-      {wallets.map((w, i) => (
+      {(wallets || []).map((w, i) => (
         <motion.div
           key={w.wallet}
           initial={{ opacity: 0, scale: 0.95 }}
@@ -176,7 +176,7 @@ function ListView({ wallets, totalTickets }) {
         <div className="col-span-2">Tickets</div>
         <div className="col-span-2 text-right">Win Chance</div>
       </div>
-      {wallets.map((w, i) => (
+      {(wallets || []).map((w, i) => (
         <motion.div
           key={w.wallet}
           initial={{ opacity: 0, x: -8 }}
