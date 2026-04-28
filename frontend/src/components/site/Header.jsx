@@ -32,7 +32,7 @@ export default function Header() {
     >
       <div className="max-w-[1400px] mx-auto px-6 md:px-12 h-16 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2.5 group" data-testid="logo-link">
-          <div className="w-8 h-8 rounded-full roulette-wheel" />
+          <img src="/logo.svg" alt="" className="w-8 h-8 transition-transform duration-700 group-hover:rotate-180" />
           <span className="font-display font-black text-xl tracking-tight">
             $ROLLAT
           </span>
