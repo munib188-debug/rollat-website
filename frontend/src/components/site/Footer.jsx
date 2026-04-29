@@ -1,20 +1,9 @@
-import { Send } from "lucide-react";
+import { Send, Pill } from "lucide-react";
 
 function XIcon({ className }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-    </svg>
-  );
-}
-
-function PumpIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <g transform="rotate(45 12 12)">
-        <path d="M12 6h-6a6 6 0 0 0 0 12h6V6z" fill="#4FD15A" />
-        <path d="M12 6h6a6 6 0 0 1 0 12h-6V6z" fill="#FFFFFF" />
-      </g>
     </svg>
   );
 }
@@ -36,7 +25,7 @@ export default function Footer() {
             <div className="flex gap-3">
               <Social icon={XIcon} label="x" href="https://x.com/Rollat_online" />
               <Social icon={Send} label="telegram" href="https://t.me/rollat" />
-              <Social icon={PumpIcon} label="pumpfun" href="https://pump.fun/coin/6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump" />
+              <Social icon={Pill} label="pumpfun" href="https://pump.fun/coin/6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump" />
             </div>
           </div>
 
