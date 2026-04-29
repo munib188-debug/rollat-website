@@ -4,15 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Wallet, Menu, X, LogOut, ShieldCheck, Pen } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { truncWallet } from "@/lib/walletUtils";
 import { useAuth } from "@/lib/AuthContext";
+import WalletPicker from "./WalletPicker";
 
 export default function Header() {
   const [open, setOpen] = useState(false);
   const loc = useLocation();
   const { publicKey, wallet, disconnect, connecting } = useWallet();
-  const { setVisible } = useWalletModal();
+  const [pickerOpen, setPickerOpen] = useState(false);
   const { isAuthenticated, signIn, signOut, signingIn } = useAuth();
 
   const connected = !!publicKey;
@@ -40,8 +40,8 @@ export default function Header() {
         })
         .catch((e) => toast.error("Disconnect failed", { description: e?.message }));
     } else {
-      // Open the wallet picker modal (Phantom / Solflare / Backpack via wallet-standard)
-      setVisible(true);
+      // Open our custom wallet picker (lists wallets detected via Wallet Standard)
+      setPickerOpen(true);
     }
   };
 
@@ -187,6 +187,8 @@ export default function Header() {
           </Button>
         </div>
       )}
+
+      <WalletPicker open={pickerOpen} onClose={() => setPickerOpen(false)} />
     </header>
   );
 }
