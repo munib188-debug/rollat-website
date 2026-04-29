@@ -10,9 +10,11 @@ function XIcon({ className }) {
 
 function PumpIcon({ className }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M5.5 3h6a5.5 5.5 0 0 1 0 11H8v6.5c0 .276-.224.5-.5.5h-2a.5.5 0 0 1-.5-.5V3.5c0-.276.224-.5.5-.5zM8 6v5h3.5a2.5 2.5 0 0 0 0-5H8z"/>
-      <path d="M16 16.2l1.4-1.4 3.6 3.6-1.4 1.4-3.6-3.6zm2.8-2.8l1.4-1.4c.4.5.7 1 .9 1.7L19.4 14a3 3 0 0 0-.6-.6z" opacity="0.7"/>
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <g transform="rotate(45 12 12)">
+        <path d="M12 6h-6a6 6 0 0 0 0 12h6V6z" fill="#4FD15A" />
+        <path d="M12 6h6a6 6 0 0 1 0 12h-6V6z" fill="#FFFFFF" />
+      </g>
     </svg>
   );
 }
