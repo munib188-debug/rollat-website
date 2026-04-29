@@ -3,9 +3,10 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { SectionLabel } from "./HowItWorks";
 
 const data = [
-  { name: "Prize Pot", value: 2, color: "#FFD700" },
-  { name: "Liquidity", value: 1, color: "#00FFA3" },
-  { name: "Dev / Marketing", value: 1, color: "#FF3366" },
+  { name: "Prize Pot",          value: 70, color: "#FFD700", sub: "Paid to one holder every 24h" },
+  { name: "Development & Infra", value: 15, color: "#00FFA3", sub: "Servers, audits, engineering" },
+  { name: "Marketing & Community", value: 10, color: "#FF3366", sub: "Promo, KOLs, contests" },
+  { name: "Buyback & Burn",      value: 5,  color: "#FF6B35", sub: "Burns supply on every trade" },
 ];
 
 export default function Tokenomics() {
@@ -18,9 +19,9 @@ export default function Tokenomics() {
             Every trade <span className="gold-text">feeds the wheel.</span>
           </h2>
           <p className="text-white/55 text-base md:text-lg leading-relaxed mb-8">
-            A flat 4% transaction fee. Half of it pours straight into the prize pot.
+            A flat 3% transaction fee. 70% pours straight into the prize pot.
             No vesting cliffs, no team allocations sitting on holders' heads — just
-            three transparent flows.
+            four transparent flows, hardcoded into the contract.
           </p>
 
           <div className="space-y-3" data-testid="tokenomics-breakdown">
@@ -30,8 +31,7 @@ export default function Tokenomics() {
                 <div className="flex-1">
                   <div className="font-display font-bold text-lg leading-tight">{d.name}</div>
                   <div className="text-xs text-white/45 font-mono uppercase tracking-widest">
-                    {d.name === "Prize Pot" ? "Goes to the wheel every 24h" :
-                      d.name === "Liquidity" ? "Auto-LP, locked forever" : "Building & marketing"}
+                    {d.sub}
                   </div>
                 </div>
                 <div className="font-mono text-2xl font-bold" style={{ color: d.color }}>
@@ -80,7 +80,7 @@ export default function Tokenomics() {
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center">
                 <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-1">Total Tax</div>
-                <div className="font-display font-black text-6xl gold-text">4%</div>
+                <div className="font-display font-black text-6xl gold-text">3%</div>
                 <div className="text-xs text-white/45 font-mono mt-2">on every buy/sell</div>
               </div>
             </div>
