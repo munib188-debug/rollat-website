@@ -30,6 +30,7 @@ DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
 
 # pump.fun standard supply for new launches (1 billion, 6 decimals)
 PUMP_TOTAL_SUPPLY = 1_000_000_000
+TOKEN_DECIMALS = 6  # pump.fun standard
 
 # -- tiny TTL cache --------------------------------------------------------
 
@@ -195,6 +196,62 @@ async def fetch_holders_count(mint: Optional[str] = None) -> int:
     count = len(unique_owners)
     _cache_set(f"holders:{mint}", count, 60)
     return count
+
+
+async def fetch_holder_snapshot(mint: Optional[str] = None) -> list[dict]:
+    """Returns [{wallet, amount}] for every current holder, with multiple ATAs
+    aggregated per owner. Amount is human-readable (raw / 10^decimals).
+
+    This is what the hourly snapshot job persists to Mongo. Not cached — the
+    snapshot task is the only caller and it explicitly wants a fresh read.
+    Capped at 50 pages = 50k accounts (one Helius page = 1000 accounts)."""
+    mint = mint or TOKEN_MINT
+    if not mint or not SOLANA_RPC_URL:
+        return []
+
+    owner_amounts: dict[str, float] = {}
+    cursor: Optional[str] = None
+    pages = 0
+    max_pages = 50
+
+    async with httpx.AsyncClient() as client:
+        while pages < max_pages:
+            params: dict = {"mint": mint, "limit": 1000}
+            if cursor:
+                params["cursor"] = cursor
+            try:
+                r = await client.post(
+                    SOLANA_RPC_URL,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": str(pages),
+                        "method": "getTokenAccounts",
+                        "params": params,
+                    },
+                    timeout=20,
+                )
+                data = r.json()
+                result = data.get("result") or {}
+                accounts = result.get("token_accounts") or result.get("tokenAccounts") or []
+                for acc in accounts:
+                    owner = acc.get("owner")
+                    raw = acc.get("amount", 0)
+                    if owner and raw:
+                        try:
+                            raw_int = int(raw)
+                        except (TypeError, ValueError):
+                            continue
+                        if raw_int > 0:
+                            owner_amounts[owner] = owner_amounts.get(owner, 0) + (raw_int / 10 ** TOKEN_DECIMALS)
+                cursor = result.get("cursor")
+                pages += 1
+                if not cursor or not accounts:
+                    break
+            except Exception as e:
+                logger.warning(f"snapshot page {pages} failed: {e}")
+                break
+
+    return [{"wallet": w, "amount": a} for w, a in owner_amounts.items()]
 
 
 # -- per-wallet balance via standard Solana RPC ---------------------------

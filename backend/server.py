@@ -29,6 +29,7 @@ from onchain import (
     fetch_wallet_balance,
     is_configured as onchain_is_configured,
 )
+from snapshots import SnapshotStore
 
 
 ROOT_DIR = Path(__file__).parent
@@ -280,11 +281,12 @@ def generate_mock_qualified_wallets(count: int = 347) -> List[dict]:
 
 
 nonce_store: Optional[NonceStore] = None
+snapshot_store: Optional[SnapshotStore] = None
 
 
 @api_router.on_event("startup")
 async def on_startup():
-    global USE_MONGO, nonce_store
+    global USE_MONGO, nonce_store, snapshot_store
     try:
         await db.command("ping")
         USE_MONGO = True
@@ -295,6 +297,10 @@ async def on_startup():
 
     nonce_store = NonceStore(_get_col("auth_nonces"))
     await nonce_store.ensure_indexes()
+
+    snapshot_store = SnapshotStore(_get_col("holder_snapshots"))
+    await snapshot_store.ensure_indexes()
+    snapshot_store.start_loop()
 
     winners_col = _get_col("winners")
     spin_col = _get_col("spin_state")
@@ -371,6 +377,34 @@ async def auth_me(address: str = Depends(get_current_wallet)):
     """Returns the wallet bound to the current JWT. Useful for client to verify a token is still valid."""
     # exp isn't stored separately; client can decode jti/exp itself, but echoing the address proves authenticity
     return MeResponse(address=address, expires_at="")
+
+
+@api_router.get("/snapshots/status")
+async def snapshots_status():
+    """Operational endpoint: confirms the hourly snapshot loop is running.
+    Returns total snapshots stored, the most recent capture time, and the
+    most-recent holder count. Public so the frontend can show 'system live' UX."""
+    coll = _get_col("holder_snapshots")
+    try:
+        total = await coll.count_documents({}) if hasattr(coll, "count_documents") else 0
+    except Exception:
+        total = 0
+    latest_at: Optional[str] = None
+    latest_holders: Optional[int] = None
+    try:
+        latest = await coll.find_one({}, sort=[("captured_at", -1)])
+        if latest:
+            ts = latest.get("captured_at")
+            latest_at = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+            latest_holders = latest.get("total_holders")
+    except Exception:
+        pass
+    return {
+        "total_snapshots": total,
+        "latest_captured_at": latest_at,
+        "latest_holder_count": latest_holders,
+        "ttl_hours": 48,
+    }
 
 
 def _next_daily_spin(now: datetime) -> datetime:
@@ -632,4 +666,6 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    if snapshot_store is not None:
+        snapshot_store.stop_loop()
     client.close()
