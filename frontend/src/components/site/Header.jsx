@@ -1,26 +1,43 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Wallet, Menu, X, LogOut } from "lucide-react";
+import { Wallet, Menu, X, LogOut, ShieldCheck, Pen } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { truncWallet } from "@/lib/walletUtils";
+import { useAuth } from "@/lib/AuthContext";
 
 export default function Header() {
   const [open, setOpen] = useState(false);
   const loc = useLocation();
   const { publicKey, wallet, disconnect, connecting } = useWallet();
   const { setVisible } = useWalletModal();
+  const { isAuthenticated, signIn, signOut, signingIn } = useAuth();
 
   const connected = !!publicKey;
   const addr = publicKey?.toBase58();
+  const showSignIn = connected && !isAuthenticated;
+
+  const handleSignIn = async () => {
+    try {
+      await signIn();
+      toast.success("Signed in", {
+        description: "Wallet ownership verified. Token expires in 1h.",
+      });
+    } catch (e) {
+      toast.error("Sign-in failed", { description: e?.message || "Please try again." });
+    }
+  };
 
   const handleConnect = () => {
     if (connected) {
-      // Already connected: disconnect
+      // Already connected: disconnect (also clears the JWT via AuthContext effect)
       disconnect()
-        .then(() => toast.success("Wallet disconnected"))
+        .then(() => {
+          signOut();
+          toast.success("Wallet disconnected");
+        })
         .catch((e) => toast.error("Disconnect failed", { description: e?.message }));
     } else {
       // Open the wallet picker modal (Phantom / Solflare / Backpack via wallet-standard)
@@ -73,6 +90,19 @@ export default function Header() {
               Dashboard
             </Button>
           </Link>
+          {showSignIn && (
+            <Button
+              onClick={handleSignIn}
+              disabled={signingIn}
+              variant="outline"
+              className="border-gold/50 text-gold hover:bg-gold/10 hover:text-gold font-bold uppercase tracking-widest text-xs rounded-sm h-9 px-3"
+              data-testid="header-sign-in-btn"
+              title="Sign a message to prove wallet ownership (no transaction)"
+            >
+              <Pen className="w-3.5 h-3.5 mr-1.5" />
+              {signingIn ? "Signing…" : "Sign in"}
+            </Button>
+          )}
           <Button
             onClick={handleConnect}
             disabled={connecting}
@@ -82,7 +112,11 @@ export default function Header() {
           >
             {connected ? (
               <>
-                <LogOut className="w-4 h-4 mr-2" />
+                {isAuthenticated ? (
+                  <ShieldCheck className="w-4 h-4 mr-2 text-emerald-300" />
+                ) : (
+                  <LogOut className="w-4 h-4 mr-2" />
+                )}
                 {truncWallet(addr)}
               </>
             ) : (
@@ -117,6 +151,18 @@ export default function Header() {
             </a>
           ))}
           <Link to="/dashboard" onClick={() => setOpen(false)} className="text-white/70">Dashboard</Link>
+          {showSignIn && (
+            <Button
+              onClick={() => { handleSignIn(); setOpen(false); }}
+              disabled={signingIn}
+              variant="outline"
+              className="border-gold/50 text-gold hover:bg-gold/10 hover:text-gold font-bold uppercase tracking-widest text-xs rounded-sm"
+              data-testid="mobile-sign-in-btn"
+            >
+              <Pen className="w-3.5 h-3.5 mr-2" />
+              {signingIn ? "Signing…" : "Sign in"}
+            </Button>
+          )}
           <Button
             onClick={() => { handleConnect(); setOpen(false); }}
             disabled={connecting}
@@ -125,7 +171,11 @@ export default function Header() {
           >
             {connected ? (
               <>
-                <LogOut className="w-4 h-4 mr-2" />
+                {isAuthenticated ? (
+                  <ShieldCheck className="w-4 h-4 mr-2 text-emerald-300" />
+                ) : (
+                  <LogOut className="w-4 h-4 mr-2" />
+                )}
                 Disconnect ({truncWallet(addr)})
               </>
             ) : (

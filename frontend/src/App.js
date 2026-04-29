@@ -6,6 +6,7 @@ import Dashboard from "@/pages/Dashboard";
 import { Toaster } from "@/components/ui/sonner";
 import { SpinPhaseProvider } from "@/lib/SpinPhaseContext";
 import SolanaWalletProvider from "@/lib/SolanaWalletProvider";
+import { AuthProvider } from "@/lib/AuthContext";
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -36,17 +37,19 @@ function App() {
   return (
     <ErrorBoundary>
       <SolanaWalletProvider>
-        <SpinPhaseProvider>
-          <div className="App font-sans bg-obsidian-950 text-white min-h-screen">
-            <BrowserRouter>
-              <Routes>
-                <Route path="/" element={<Landing />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-              </Routes>
-            </BrowserRouter>
-            <Toaster richColors position="top-center" />
-          </div>
-        </SpinPhaseProvider>
+        <AuthProvider>
+          <SpinPhaseProvider>
+            <div className="App font-sans bg-obsidian-950 text-white min-h-screen">
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/" element={<Landing />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                </Routes>
+              </BrowserRouter>
+              <Toaster richColors position="top-center" />
+            </div>
+          </SpinPhaseProvider>
+        </AuthProvider>
       </SolanaWalletProvider>
     </ErrorBoundary>
   );

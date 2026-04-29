@@ -1,10 +1,32 @@
 import { useEffect, useState, useRef } from "react";
 import axios from "axios";
+import { loadStoredAuth, clearAuth } from "./auth";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const WS_URL = (process.env.REACT_APP_BACKEND_URL || "").replace(/^http/, "ws") + "/ws/spin";
 
 export const api = axios.create({ baseURL: API });
+
+// Attach JWT (when present) to every request.
+api.interceptors.request.use((config) => {
+  const auth = loadStoredAuth();
+  if (auth?.token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${auth.token}`;
+  }
+  return config;
+});
+
+// On any 401 from a protected endpoint, drop the stored token so the UI re-prompts a sign-in.
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err?.response?.status === 401) {
+      clearAuth();
+    }
+    return Promise.reject(err);
+  }
+);
 
 export function useStats() {
   const [stats, setStats] = useState(null);

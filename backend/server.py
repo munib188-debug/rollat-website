@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -12,6 +12,17 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Set
 import uuid
 from datetime import datetime, timezone, timedelta
+
+from auth import (
+    NonceStore,
+    NonceResponse,
+    VerifyRequest,
+    VerifyResponse,
+    MeResponse,
+    verify_solana_signature,
+    issue_jwt,
+    get_current_wallet,
+)
 
 
 ROOT_DIR = Path(__file__).parent
@@ -262,9 +273,12 @@ def generate_mock_qualified_wallets(count: int = 347) -> List[dict]:
     return wallets
 
 
+nonce_store: Optional[NonceStore] = None
+
+
 @api_router.on_event("startup")
 async def on_startup():
-    global USE_MONGO
+    global USE_MONGO, nonce_store
     try:
         await db.command("ping")
         USE_MONGO = True
@@ -272,6 +286,9 @@ async def on_startup():
     except Exception:
         USE_MONGO = False
         logger.info("MongoDB unavailable — using in-memory store")
+
+    nonce_store = NonceStore(_get_col("auth_nonces"))
+    await nonce_store.ensure_indexes()
 
     winners_col = _get_col("winners")
     spin_col = _get_col("spin_state")
@@ -314,6 +331,40 @@ async def on_startup():
 @api_router.get("/")
 async def root():
     return {"message": "$ROLLAT API live", "status": "spinning"}
+
+
+# ---------- Sign-in-with-Solana ----------
+@api_router.get("/auth/nonce", response_model=NonceResponse)
+async def auth_nonce(address: str):
+    """Issue a one-time nonce + SIWS message for the given wallet address."""
+    if nonce_store is None:
+        raise HTTPException(status_code=503, detail="auth not initialized")
+    return await nonce_store.issue(address)
+
+
+@api_router.post("/auth/verify", response_model=VerifyResponse)
+async def auth_verify(req: VerifyRequest):
+    """Verify a signed SIWS message and return a short-lived JWT."""
+    if nonce_store is None:
+        raise HTTPException(status_code=503, detail="auth not initialized")
+
+    doc = await nonce_store.consume(req.address, req.nonce)
+    if not doc:
+        raise HTTPException(status_code=400, detail="nonce missing, expired, or already used")
+
+    message = doc.get("message")
+    if not message or not verify_solana_signature(req.address, message, req.signature):
+        raise HTTPException(status_code=401, detail="signature verification failed")
+
+    token, exp = issue_jwt(req.address)
+    return VerifyResponse(token=token, address=req.address, expires_at=exp.isoformat())
+
+
+@api_router.get("/auth/me", response_model=MeResponse)
+async def auth_me(address: str = Depends(get_current_wallet)):
+    """Returns the wallet bound to the current JWT. Useful for client to verify a token is still valid."""
+    # exp isn't stored separately; client can decode jti/exp itself, but echoing the address proves authenticity
+    return MeResponse(address=address, expires_at="")
 
 
 @api_router.get("/stats", response_model=Stats)
