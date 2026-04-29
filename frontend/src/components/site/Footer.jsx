@@ -1,9 +1,18 @@
-import { Github, Send } from "lucide-react";
+import { Send } from "lucide-react";
 
 function XIcon({ className }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
+
+function PumpIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M5.5 3h6a5.5 5.5 0 0 1 0 11H8v6.5c0 .276-.224.5-.5.5h-2a.5.5 0 0 1-.5-.5V3.5c0-.276.224-.5.5-.5zM8 6v5h3.5a2.5 2.5 0 0 0 0-5H8z"/>
+      <path d="M16 16.2l1.4-1.4 3.6 3.6-1.4 1.4-3.6-3.6zm2.8-2.8l1.4-1.4c.4.5.7 1 .9 1.7L19.4 14a3 3 0 0 0-.6-.6z" opacity="0.7"/>
     </svg>
   );
 }
@@ -25,7 +34,7 @@ export default function Footer() {
             <div className="flex gap-3">
               <Social icon={XIcon} label="x" href="https://x.com/Rollat_online" />
               <Social icon={Send} label="telegram" href="https://t.me/rollat" />
-              <Social icon={Github} label="github" href="#" />
+              <Social icon={PumpIcon} label="pumpfun" href="https://pump.fun/coin/6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump" />
             </div>
           </div>
 
