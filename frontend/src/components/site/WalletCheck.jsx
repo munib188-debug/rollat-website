@@ -4,9 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
-import { Search, CheckCircle2, AlertCircle, Ticket } from "lucide-react";
+import { Search, CheckCircle2, AlertCircle, Ticket, Wallet } from "lucide-react";
 import { SectionLabel } from "./HowItWorks";
 import { toast } from "sonner";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { isValidSolanaAddress, truncWallet } from "@/lib/walletUtils";
 
 const fmtTokens = (n) => {
   if (n == null) return "—";
@@ -19,6 +21,8 @@ export default function WalletCheck() {
   const [addr, setAddr] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const { publicKey } = useWallet();
+  const myAddr = publicKey?.toBase58();
 
   const sample = "5xq2HnPmK3rT2fG8aNc8nP";
 
@@ -26,6 +30,12 @@ export default function WalletCheck() {
     const target = (input ?? addr).trim();
     if (!target) {
       toast.error("Enter a wallet address");
+      return;
+    }
+    if (!isValidSolanaAddress(target)) {
+      toast.error("Invalid Solana address", {
+        description: "Must be a valid base58 public key (32–44 chars).",
+      });
       return;
     }
     setLoading(true);
@@ -37,6 +47,12 @@ export default function WalletCheck() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const useMyWallet = () => {
+    if (!myAddr) return;
+    setAddr(myAddr);
+    check(myAddr);
   };
 
   return (
@@ -91,13 +107,25 @@ export default function WalletCheck() {
               {loading ? "Checking…" : "Check"}
             </Button>
           </div>
-          <button
-            onClick={() => { setAddr(sample); check(sample); }}
-            className="text-xs text-white/40 hover:text-gold font-mono mb-6"
-            data-testid="sample-wallet-btn"
-          >
-            try sample → {sample.slice(0, 14)}…
-          </button>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-6">
+            {myAddr && (
+              <button
+                onClick={useMyWallet}
+                className="inline-flex items-center gap-1.5 text-xs text-gold hover:text-gold-hover font-mono"
+                data-testid="use-my-wallet-btn"
+              >
+                <Wallet className="w-3 h-3" />
+                use my wallet → {truncWallet(myAddr)}
+              </button>
+            )}
+            <button
+              onClick={() => { setAddr(sample); check(sample); }}
+              className="text-xs text-white/40 hover:text-gold font-mono"
+              data-testid="sample-wallet-btn"
+            >
+              try sample → {sample.slice(0, 14)}…
+            </button>
+          </div>
 
           {result && <ResultPanel r={result} />}
           {!result && <EmptyState />}

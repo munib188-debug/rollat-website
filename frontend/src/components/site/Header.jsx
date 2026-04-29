@@ -1,19 +1,31 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Wallet, Menu, X } from "lucide-react";
+import { Wallet, Menu, X, LogOut } from "lucide-react";
 import { toast } from "sonner";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { truncWallet } from "@/lib/walletUtils";
 
 export default function Header() {
   const [open, setOpen] = useState(false);
-  const [connected, setConnected] = useState(false);
   const loc = useLocation();
+  const { publicKey, wallet, disconnect, connecting } = useWallet();
+  const { setVisible } = useWalletModal();
+
+  const connected = !!publicKey;
+  const addr = publicKey?.toBase58();
 
   const handleConnect = () => {
-    setConnected(true);
-    toast.success("Phantom connected (mock)", {
-      description: "5xq2...c8nP — qualified for Round #100",
-    });
+    if (connected) {
+      // Already connected: disconnect
+      disconnect()
+        .then(() => toast.success("Wallet disconnected"))
+        .catch((e) => toast.error("Disconnect failed", { description: e?.message }));
+    } else {
+      // Open the wallet picker modal (Phantom / Solflare / Backpack via wallet-standard)
+      setVisible(true);
+    }
   };
 
   const links = [
@@ -63,11 +75,22 @@ export default function Header() {
           </Link>
           <Button
             onClick={handleConnect}
+            disabled={connecting}
             className="bg-gold text-obsidian-950 hover:bg-gold-hover font-bold uppercase tracking-widest text-xs rounded-sm h-9 px-4"
             data-testid="header-connect-wallet-btn"
+            title={connected ? `${wallet?.adapter?.name} · click to disconnect` : "Connect a Solana wallet"}
           >
-            <Wallet className="w-4 h-4 mr-2" />
-            {connected ? "5xq2…c8nP" : "Connect"}
+            {connected ? (
+              <>
+                <LogOut className="w-4 h-4 mr-2" />
+                {truncWallet(addr)}
+              </>
+            ) : (
+              <>
+                <Wallet className="w-4 h-4 mr-2" />
+                {connecting ? "Connecting…" : "Connect"}
+              </>
+            )}
           </Button>
         </div>
 
@@ -95,12 +118,22 @@ export default function Header() {
           ))}
           <Link to="/dashboard" onClick={() => setOpen(false)} className="text-white/70">Dashboard</Link>
           <Button
-            onClick={handleConnect}
+            onClick={() => { handleConnect(); setOpen(false); }}
+            disabled={connecting}
             className="bg-gold text-obsidian-950 hover:bg-gold-hover font-bold uppercase tracking-widest text-xs rounded-sm"
             data-testid="mobile-connect-wallet-btn"
           >
-            <Wallet className="w-4 h-4 mr-2" />
-            {connected ? "Connected" : "Connect Phantom"}
+            {connected ? (
+              <>
+                <LogOut className="w-4 h-4 mr-2" />
+                Disconnect ({truncWallet(addr)})
+              </>
+            ) : (
+              <>
+                <Wallet className="w-4 h-4 mr-2" />
+                {connecting ? "Connecting…" : "Connect Wallet"}
+              </>
+            )}
           </Button>
         </div>
       )}
