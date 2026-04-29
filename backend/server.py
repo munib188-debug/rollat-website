@@ -23,6 +23,12 @@ from auth import (
     issue_jwt,
     get_current_wallet,
 )
+from onchain import (
+    fetch_token_market_data,
+    fetch_holders_count,
+    fetch_wallet_balance,
+    is_configured as onchain_is_configured,
+)
 
 
 ROOT_DIR = Path(__file__).parent
@@ -367,10 +373,18 @@ async def auth_me(address: str = Depends(get_current_wallet)):
     return MeResponse(address=address, expires_at="")
 
 
+def _next_daily_spin(now: datetime) -> datetime:
+    """Spin cadence is 24h, anchored at 00:00 UTC. Returns the next anchor strictly in the future."""
+    today_anchor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if now < today_anchor:
+        return today_anchor
+    return today_anchor + timedelta(days=1)
+
+
 @api_router.get("/stats", response_model=Stats)
 async def get_stats():
     now = datetime.now(timezone.utc)
-    next_spin = (now + timedelta(hours=6)).replace(minute=0, second=0, microsecond=0)
+    next_spin = _next_daily_spin(now)
     winners = await _get_col("winners").find({}, {"_id": 0}).to_list(1000)
     total_distributed = sum(w.get("amount_sol", 0) for w in winners)
     biggest = max((w.get("amount_sol", 0) for w in winners), default=0)
@@ -381,19 +395,26 @@ async def get_stats():
     spin_phase = spin_doc.get("phase", "idle") if spin_doc else "idle"
     last_winner = spin_doc.get("winner") if spin_doc else None
 
+    # Pull live on-chain numbers in parallel. Fetchers are cached internally so
+    # they are cheap even when /stats is polled every 15s by every client.
+    market, holders = await asyncio.gather(
+        fetch_token_market_data(),
+        fetch_holders_count(),
+    )
+
     return Stats(
-        current_pot_sol=round(46.5 + random.uniform(-1.5, 6.5), 2),
+        current_pot_sol=0.0,                    # Real pot tracking lands in Step 6
         next_spin_at=next_spin.isoformat(),
-        total_qualified_wallets=347,
+        total_qualified_wallets=0,              # Real qualification lands in Step 4 + 5
         total_distributed_sol=round(total_distributed, 2),
         biggest_win_sol=round(biggest, 2),
         spins_completed=spins,
         rollover_active=False,
         rollover_count=0,
-        pot_threshold_sol=5.0,
-        token_price_usd=0.00042,
-        market_cap_usd=4_200_000.0,
-        holders=2_847,
+        pot_threshold_sol=25.0,
+        token_price_usd=float(market.get("price_usd") or 0),
+        market_cap_usd=float(market.get("market_cap_usd") or 0),
+        holders=int(holders or 0),
         spin_phase=spin_phase,
         last_winner=last_winner,
     )
@@ -410,18 +431,18 @@ async def get_winners(limit: int = 20):
 
 @api_router.get("/wallet-check/{wallet}", response_model=WalletStatus)
 async def wallet_check(wallet: str):
-    if not wallet or len(wallet) < 4:
+    if not wallet or len(wallet) < 32 or len(wallet) > 44:
         raise HTTPException(status_code=400, detail="Invalid wallet")
-    h = hashlib.sha256(wallet.encode()).hexdigest()
-    seed = int(h[:8], 16)
-    rng = random.Random(seed)
 
-    holdings = round(rng.uniform(40_000, 3_400_000), 0)
-    hours = rng.randint(8, 24)
-    is_qualified = holdings >= 100_000 and hours == 24
-    tickets = tickets_for_holdings(holdings) if is_qualified else 0
-    snapshots = [True if i < hours else False for i in range(24)]
-    is_recent_winner = (seed % 17) == 0
+    # Real on-chain balance. 24h-snapshot history lands in Step 4; until then
+    # hours_held=0 / snapshots all-false / is_qualified=false. We still report
+    # the real holdings so users can see whether their bag meets the threshold.
+    holdings = await fetch_wallet_balance(wallet)
+    hours = 0
+    is_qualified = False
+    tickets = 0
+    snapshots = [False] * 24
+    is_recent_winner = False
     return WalletStatus(
         wallet=wallet,
         is_qualified=is_qualified and not is_recent_winner,
