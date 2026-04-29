@@ -1,4 +1,12 @@
-import { Github, Twitter, Send } from "lucide-react";
+import { Github, Send } from "lucide-react";
+
+function XIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
 
 export default function Footer() {
   return (
@@ -15,9 +23,9 @@ export default function Footer() {
               Powered by Chainlink VRF on Solana.
             </p>
             <div className="flex gap-3">
-              <Social icon={Twitter} label="twitter" />
-              <Social icon={Send} label="telegram" />
-              <Social icon={Github} label="github" />
+              <Social icon={XIcon} label="x" href="https://x.com/Rollat_online" />
+              <Social icon={Send} label="telegram" href="https://t.me/rollat" />
+              <Social icon={Github} label="github" href="#" />
             </div>
           </div>
 
@@ -56,10 +64,13 @@ export default function Footer() {
   );
 }
 
-function Social({ icon: Icon, label }) {
+function Social({ icon: Icon, label, href = "#" }) {
+  const isExternal = href.startsWith("http");
   return (
     <a
-      href="#"
+      href={href}
+      target={isExternal ? "_blank" : undefined}
+      rel={isExternal ? "noopener noreferrer" : undefined}
       className="w-9 h-9 border border-white/10 hover:border-gold/40 hover:text-gold flex items-center justify-center rounded-sm text-white/60 transition-colors"
       data-testid={`social-${label}`}
       aria-label={label}

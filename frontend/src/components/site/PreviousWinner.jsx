@@ -78,7 +78,7 @@ export default function PreviousWinner() {
                   </div>
                 </div>
                 <a
-                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`I just won ${fmtSol(winner?.amount_sol)} in @ROLLATcoin's on-chain roulette 🎰 Round #${winner?.round_number} · $ROLLAT`)}`}
+                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`I just won ${fmtSol(winner?.amount_sol)} in @Rollat_online's on-chain roulette 🎰 Round #${winner?.round_number} · $ROLLAT`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="sm:ml-4 inline-flex items-center gap-2 px-4 py-2 rounded-sm border border-white/20 hover:border-white/40 text-white/70 hover:text-white text-xs font-mono uppercase tracking-widest transition-colors"

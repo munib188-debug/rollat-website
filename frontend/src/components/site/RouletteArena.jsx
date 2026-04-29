@@ -222,7 +222,7 @@ function WinnerReveal({ winner, stats }) {
 
   if (!winner) return null;
 
-  const shareText = `I just witnessed ${fmtSol(winner.amount_sol)} awarded in @ROLLATcoin's on-chain roulette 🎰 Round #${winner.round_number} · $ROLLAT`;
+  const shareText = `I just witnessed ${fmtSol(winner.amount_sol)} awarded in @Rollat_online's on-chain roulette 🎰 Round #${winner.round_number} · $ROLLAT`;
 
   return (
     <>
