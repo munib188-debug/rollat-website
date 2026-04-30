@@ -468,7 +468,7 @@ async def get_stats():
         spins_completed=spins,
         rollover_active=False,
         rollover_count=0,
-        pot_threshold_sol=25.0,
+        pot_threshold_sol=5.0,
         token_price_usd=float(market.get("price_usd") or 0),
         market_cap_usd=float(market.get("market_cap_usd") or 0),
         holders=int(holders or 0),

@@ -44,7 +44,7 @@ export default function Vrf() {
             <pre className="p-6 text-[12px] md:text-[13px] font-mono leading-relaxed overflow-auto scrollbar-hidden text-white/80">
 {`// SPDX-License-Identifier: MIT
 contract RollatRoulette is VRFConsumerBaseV2 {
-  uint256 public constant POT_THRESHOLD = 25 ether;
+  uint256 public constant POT_THRESHOLD = 5 ether;
   uint256 public constant MIN_HOLDINGS  = 100_000e9;
   uint256 public constant TICKET_CAP    = 6;
 

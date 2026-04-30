@@ -251,7 +251,7 @@ export default function Dashboard() {
                 {fmtSol(stats?.current_pot_sol)}
               </div>
               <div className="text-xs text-white/45 mt-2 font-mono">
-                Threshold: {stats?.pot_threshold_sol ?? 25} SOL · {stats?.rollover_active ? "Rollover ACTIVE" : "Threshold met"}
+                Threshold: {stats?.pot_threshold_sol ?? 5} SOL · {stats?.rollover_active ? "Rollover ACTIVE" : "Threshold met"}
               </div>
             </div>
             <Button
