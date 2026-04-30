@@ -2,5 +2,8 @@
   "buildCommand": "yarn build",
   "outputDirectory": "build",
   "framework": "create-react-app",
-  "rewrites": [{ "source": "/(.*)", "destination": "/" }]
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://rollat-website.onrender.com/api/$1" },
+    { "source": "/((?!api/).*)", "destination": "/" }
+  ]
 }
