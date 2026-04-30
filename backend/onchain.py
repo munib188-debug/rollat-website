@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 TOKEN_MINT      = os.environ.get("TOKEN_MINT", "")
 HELIUS_API_KEY  = os.environ.get("HELIUS_API_KEY", "")
 SOLANA_RPC_URL  = os.environ.get("SOLANA_RPC_URL", "")
+POT_WALLET      = os.environ.get("POT_WALLET", "")
 
 PUMP_FUN_API    = "https://frontend-api.pump.fun"
 DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
@@ -305,7 +306,21 @@ async def fetch_wallet_balance(wallet: str, mint: Optional[str] = None) -> float
             return 0.0
 
 
-# -- SOL balance (used for pot wallet in Step 6) --------------------------
+# -- pot SOL balance ------------------------------------------------------
+
+async def fetch_pot_balance() -> float:
+    """Returns the pot wallet's live SOL balance. 0 if POT_WALLET unset.
+
+    The pot is just the live on-chain SOL balance of the configured pot
+    wallet — spins debit it, deposits/fees credit it. No bookkeeping needed
+    on our side; on-chain is the source of truth.
+    """
+    if not POT_WALLET:
+        return 0.0
+    return await fetch_sol_balance(POT_WALLET)
+
+
+# -- generic SOL balance fetcher ------------------------------------------
 
 async def fetch_sol_balance(wallet: str) -> float:
     """Returns SOL balance (in SOL, not lamports). 0 on error."""

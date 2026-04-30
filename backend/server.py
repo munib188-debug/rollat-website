@@ -27,6 +27,7 @@ from onchain import (
     fetch_token_market_data,
     fetch_holders_count,
     fetch_wallet_balance,
+    fetch_pot_balance,
     is_configured as onchain_is_configured,
 )
 from snapshots import SnapshotStore
@@ -440,17 +441,18 @@ async def get_stats():
 
     # Pull live on-chain numbers + snapshot history in parallel. All inputs
     # are cached or indexed so /stats stays fast under polling.
-    market, holders, recent_snaps = await asyncio.gather(
+    market, holders, recent_snaps, pot_sol = await asyncio.gather(
         fetch_token_market_data(),
         fetch_holders_count(),
         fetch_recent_snapshots(_get_col("holder_snapshots")),
+        fetch_pot_balance(),
     )
 
     # Strict qualification: only count wallets when ≥24 snapshots exist.
     qualified_count = len(compute_qualified_wallets(recent_snaps)) if has_sufficient_history(recent_snaps) else 0
 
     return Stats(
-        current_pot_sol=0.0,                    # Real pot tracking lands in Step 6
+        current_pot_sol=round(float(pot_sol or 0), 4),
         next_spin_at=next_spin.isoformat(),
         total_qualified_wallets=qualified_count,
         total_distributed_sol=round(total_distributed, 2),
