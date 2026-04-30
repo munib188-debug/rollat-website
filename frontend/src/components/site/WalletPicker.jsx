@@ -56,12 +56,12 @@ export default function WalletPicker({ open, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[200] flex items-start sm:items-center justify-center bg-black/70 backdrop-blur-sm p-4 overflow-y-auto"
       data-testid="wallet-picker-overlay"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-md bg-obsidian-900 border border-white/10 rounded-sm shadow-[0_0_60px_rgba(0,0,0,0.6)]"
+        className="relative w-full max-w-md my-auto bg-obsidian-900 border border-white/10 rounded-sm shadow-[0_0_60px_rgba(0,0,0,0.6)] max-h-[calc(100vh-2rem)] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
@@ -78,7 +78,7 @@ export default function WalletPicker({ open, onClose }) {
           </button>
         </div>
 
-        <div className="p-4">
+        <div className="p-4 overflow-y-auto flex-1 min-h-0">
           {detected.length === 0 ? (
             <NoWalletsView />
           ) : (
