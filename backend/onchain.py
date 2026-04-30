@@ -26,7 +26,7 @@ HELIUS_API_KEY  = os.environ.get("HELIUS_API_KEY", "")
 SOLANA_RPC_URL  = os.environ.get("SOLANA_RPC_URL", "")
 POT_WALLET      = os.environ.get("POT_WALLET", "")
 
-PUMP_FUN_API    = "https://frontend-api.pump.fun"
+PUMP_FUN_API    = "https://frontend-api-v3.pump.fun"
 DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
 
 # pump.fun standard supply for new launches (1 billion, 6 decimals)
