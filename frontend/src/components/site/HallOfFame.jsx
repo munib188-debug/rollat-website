@@ -33,12 +33,32 @@ export default function HallOfFame() {
           </p>
         </div>
 
-        {/* Podium */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
-          {top3.map((w, i) => (
-            <Podium key={w.id} winner={w} place={i + 1} />
-          ))}
-        </div>
+        {/* Podium — only shows once we have real winners */}
+        {safeWinners.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
+            {top3.map((w, i) => (
+              <Podium key={w.id} winner={w} place={i + 1} />
+            ))}
+          </div>
+        )}
+
+        {/* Empty state — pre-first-spin */}
+        {safeWinners.length === 0 && phase !== "spinning" && (
+          <div
+            className="border border-gold/30 bg-gold/[0.03] rounded-sm p-10 md:p-14 text-center mb-10"
+            data-testid="hall-empty-state"
+          >
+            <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold mb-3">// awaiting round #1</div>
+            <h3 className="font-display font-black text-2xl md:text-3xl tracking-tighter mb-3">
+              Hall of Fame is <span className="text-gold">empty.</span>
+            </h3>
+            <p className="text-white/55 max-w-xl mx-auto text-sm md:text-base">
+              No spins have resolved yet. The first winner gets crowned at the first
+              spin after the 24h snapshot window completes — and from then on, every
+              round is recorded here forever, on-chain.
+            </p>
+          </div>
+        )}
 
         {/* Table */}
         <div className="border border-white/5 rounded-sm overflow-hidden bg-obsidian-900/40" data-testid="hall-table">

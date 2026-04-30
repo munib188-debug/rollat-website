@@ -314,33 +314,42 @@ async def on_startup():
 
     winners_col = _get_col("winners")
     spin_col = _get_col("spin_state")
+    admin_col = _get_col("admin_state")
 
-    # Seed winners
-    await winners_col.delete_many({})
-    seed = []
-    now = datetime.now(timezone.utc)
-    for i in range(24):
-        round_num = 24 - i
-        amount_sol = round(random.uniform(8, 64), 2)
-        seed.append({
-            "id": str(uuid.uuid4()),
-            "round_number": round_num,
-            "wallet": random.choice(MOCK_WALLETS),
-            "amount_sol": amount_sol,
-            "tickets": random.choice([1, 2, 3, 4, 5, 6]),
-            "participants_count": random.randint(200, 450),
-            "won_at": (now - timedelta(hours=24 * i + random.randint(0, 6))).isoformat(),
-        })
-    if seed:
-        await winners_col.insert_many(seed)
+    # One-time purge of the legacy seed winners + spin_state. Marker doc means
+    # we only run this once per Mongo cluster — real winners inserted by future
+    # spins are NEVER touched on subsequent boots.
+    try:
+        purge_marker = await admin_col.find_one({"_id": "seed_purged_v1"})
+    except Exception:
+        purge_marker = None
+    if not purge_marker:
+        try:
+            deleted = await winners_col.delete_many({})
+            logger.info(f"one-time seed purge: removed {getattr(deleted, 'deleted_count', '?')} winners")
+        except Exception:
+            logger.exception("seed purge: winners delete failed")
+        try:
+            await spin_col.delete_one({"_id": "singleton"})
+            logger.info("one-time seed purge: cleared spin_state singleton")
+        except Exception:
+            logger.exception("seed purge: spin_state delete failed")
+        try:
+            await admin_col.insert_one({
+                "_id": "seed_purged_v1",
+                "at": datetime.now(timezone.utc),
+            })
+        except Exception:
+            logger.exception("seed purge: marker insert failed")
 
-    # Initialize spin_state if missing
+    # Initialize spin_state if missing. round_number=1 is the upcoming first
+    # real spin (clean slate post-purge).
     existing = await spin_col.find_one({"_id": "singleton"})
     if not existing:
         await spin_col.insert_one({
             "_id": "singleton",
             "phase": "idle",
-            "round_number": 25,
+            "round_number": 1,
             "winner": None,
             "participants": [],
             "participants_count": 0,
