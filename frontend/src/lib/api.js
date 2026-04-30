@@ -13,7 +13,9 @@ const API = `${BACKEND}/api`;
 // reachable WS endpoint (must be a full ws:// or wss:// URL).
 const WS_URL = process.env.REACT_APP_WS_URL || null;
 
-export const api = axios.create({ baseURL: API, timeout: 10000 });
+// 60s timeout — Render free tier cold-starts the dyno after ~15 min idle, and
+// the first request can take 30–50s to wake it up.
+export const api = axios.create({ baseURL: API, timeout: 60000 });
 
 // Attach JWT (when present) to every request.
 api.interceptors.request.use((config) => {

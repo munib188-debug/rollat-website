@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { api, useStats } from "@/lib/api";
 import { useCountdown, pad } from "@/lib/useCountdown";
+import { useWallet } from "@solana/wallet-adapter-react";
+import WalletPicker from "@/components/site/WalletPicker";
 import {
   ArrowLeft, Wallet, Ticket, Trophy, Clock,
   CheckCircle2, AlertCircle, Zap, ExternalLink, Coins
@@ -35,12 +37,21 @@ function tierLabel(tickets) {
 }
 
 export default function Dashboard() {
+  const { publicKey, disconnect } = useWallet();
+  const connectedAddr = publicKey?.toBase58() || "";
   const [wallet, setWallet] = useState(DEFAULT_WALLET);
   const [input, setInput] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const stats = useStats();
   const t = useCountdown(stats?.next_spin_at);
+
+  // Sync the wallet under inspection with the connected wallet, unless the
+  // user has explicitly typed a different address into the switch input.
+  useEffect(() => {
+    if (connectedAddr && !wallet) setWallet(connectedAddr);
+  }, [connectedAddr, wallet]);
 
   const load = async (w) => {
     if (!w) return;
@@ -48,8 +59,17 @@ export default function Dashboard() {
     try {
       const { data } = await api.get(`/dashboard/${encodeURIComponent(w)}`);
       setData(data);
-    } catch {
-      toast.error("Failed to load wallet");
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      if (err?.code === "ECONNABORTED") {
+        toast.error("Server is waking up", {
+          description: "The backend is starting from cold. Try again in 20–30 seconds.",
+        });
+      } else {
+        toast.error("Failed to load wallet", {
+          description: detail || err?.message || "Network error",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -81,32 +101,76 @@ export default function Dashboard() {
             <span className="hidden md:inline text-[10px] uppercase tracking-[0.25em] font-mono text-gold border border-gold/30 px-2 py-1 rounded-sm ml-2">DASHBOARD</span>
           </Link>
           <div className="flex items-center gap-2">
+            {connectedAddr ? (
+              <>
+                <span className="hidden md:inline-flex items-center gap-2 px-3 h-9 border border-emerald_neon/30 text-emerald_neon bg-emerald_neon/5 rounded-sm font-mono text-[11px] uppercase tracking-widest">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald_neon animate-flicker" />
+                  {connectedAddr.slice(0, 4)}…{connectedAddr.slice(-4)}
+                </span>
+                <Button
+                  onClick={() => { disconnect(); setWallet(""); setData(null); }}
+                  variant="outline"
+                  className="border-white/15 bg-transparent text-white hover:bg-white/5 hover:border-crimson/40 h-9 px-4 font-mono text-[11px] uppercase tracking-widest rounded-sm"
+                  data-testid="dashboard-disconnect-btn"
+                >
+                  Disconnect
+                </Button>
+              </>
+            ) : (
+              <Button
+                onClick={() => setPickerOpen(true)}
+                className="bg-gold text-obsidian-950 hover:bg-gold-hover h-9 px-4 font-mono text-[11px] uppercase tracking-widest rounded-sm font-bold"
+                data-testid="dashboard-connect-btn"
+              >
+                <Wallet className="w-3.5 h-3.5 mr-2" /> Connect Wallet
+              </Button>
+            )}
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSwitch()}
               placeholder="Switch wallet…"
-              className="hidden md:block w-72 bg-obsidian-900/80 border-white/10 text-white font-mono text-xs h-9 rounded-sm"
+              className="hidden lg:block w-60 bg-obsidian-900/80 border-white/10 text-white font-mono text-xs h-9 rounded-sm"
               data-testid="dashboard-wallet-input"
             />
             <Button
               onClick={handleSwitch}
               variant="outline"
-              className="border-white/15 bg-transparent text-white hover:bg-white/5 hover:border-gold/40 h-9 px-4 font-mono text-[11px] uppercase tracking-widest rounded-sm"
+              className="hidden lg:inline-flex border-white/15 bg-transparent text-white hover:bg-white/5 hover:border-gold/40 h-9 px-4 font-mono text-[11px] uppercase tracking-widest rounded-sm"
               data-testid="dashboard-switch-btn"
             >
-              <Wallet className="w-3.5 h-3.5 mr-2" /> Switch
+              Switch
             </Button>
           </div>
         </div>
       </header>
 
       <main className="max-w-[1400px] mx-auto px-6 md:px-12 py-10 md:py-14 relative">
+        {!wallet && (
+          <div className="glass rounded-sm p-10 md:p-14 mb-10 text-center" data-testid="dashboard-empty">
+            <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold mb-3">No wallet selected</div>
+            <h2 className="font-display font-black text-3xl md:text-4xl tracking-tighter mb-3">
+              Connect a wallet to see your dashboard
+            </h2>
+            <p className="text-white/55 max-w-xl mx-auto mb-6">
+              Once connected, you'll see your $ROLLAT balance, ticket count, 24-hour
+              snapshot progress, and any past wins — all live, on-chain.
+            </p>
+            <Button
+              onClick={() => setPickerOpen(true)}
+              className="bg-gold text-obsidian-950 hover:bg-gold-hover font-bold uppercase tracking-widest text-xs rounded-sm h-12 px-6"
+              data-testid="dashboard-empty-connect-btn"
+            >
+              <Wallet className="w-4 h-4 mr-2" /> Connect Wallet
+            </Button>
+          </div>
+        )}
+
         <div className="mb-10 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold mb-2">Connected Wallet</div>
+            <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold mb-2">Wallet</div>
             <div className="font-display font-black text-3xl md:text-4xl tracking-tighter break-all">
-              {wallet.slice(0, 8)}…{wallet.slice(-6)}
+              {wallet ? `${wallet.slice(0, 8)}…${wallet.slice(-6)}` : "—"}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -310,6 +374,8 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      <WalletPicker open={pickerOpen} onClose={() => setPickerOpen(false)} />
     </div>
   );
 }

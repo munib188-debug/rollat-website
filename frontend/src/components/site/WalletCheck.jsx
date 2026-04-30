@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,8 +42,20 @@ export default function WalletCheck() {
     try {
       const { data } = await api.get(`/wallet-check/${encodeURIComponent(target)}`);
       setResult(data);
-    } catch {
-      toast.error("Wallet check failed");
+    } catch (err) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      if (err?.code === "ECONNABORTED") {
+        toast.error("Server is waking up", {
+          description: "The backend is starting from cold. Try again in 20–30 seconds.",
+        });
+      } else if (status === 400) {
+        toast.error("Invalid wallet", { description: detail || "Backend rejected the address." });
+      } else {
+        toast.error("Wallet check failed", {
+          description: detail || err?.message || "Network error",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -54,6 +66,15 @@ export default function WalletCheck() {
     setAddr(myAddr);
     check(myAddr);
   };
+
+  // Auto-check the connected wallet the first time it appears.
+  useEffect(() => {
+    if (myAddr && !result && !loading) {
+      setAddr(myAddr);
+      check(myAddr);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myAddr]);
 
   return (
     <section className="relative py-24 md:py-32 px-6 md:px-12" data-testid="wallet-check-section">
