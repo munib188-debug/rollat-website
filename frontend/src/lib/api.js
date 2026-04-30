@@ -118,7 +118,10 @@ export function useSpinState() {
 }
 
 export function useQualifiedWallets(page = 1, perPage = 50, search = "") {
-  const [data, setData] = useState({ wallets: [], total: 0, total_tickets: 0, page: 1, per_page: 50 });
+  const [data, setData] = useState({
+    wallets: [], total: 0, total_tickets: 0, page: 1, per_page: 50,
+    qualification_active: true, snapshots_captured: 24,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

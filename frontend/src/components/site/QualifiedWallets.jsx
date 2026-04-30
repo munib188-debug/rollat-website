@@ -39,7 +39,11 @@ export default function QualifiedWallets() {
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(1);
 
-  const { wallets, total, total_tickets, loading } = useQualifiedWallets(page, 48, search);
+  const {
+    wallets, total, total_tickets, loading,
+    qualification_active: qualificationActive,
+    snapshots_captured: snapshotsCaptured,
+  } = useQualifiedWallets(page, 48, search);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -97,6 +101,8 @@ export default function QualifiedWallets() {
 
         {loading ? (
           <div className="flex items-center justify-center py-20 text-white/30 font-mono text-sm">Loading wallets...</div>
+        ) : qualificationActive === false ? (
+          <BootstrapNotice captured={snapshotsCaptured ?? 0} />
         ) : view === "grid" ? (
           <GridView wallets={wallets} totalTickets={total_tickets} />
         ) : (
@@ -127,6 +133,39 @@ export default function QualifiedWallets() {
         )}
       </div>
     </section>
+  );
+}
+
+function BootstrapNotice({ captured }) {
+  const total = 24;
+  const pct = Math.min(100, (captured / total) * 100);
+  return (
+    <div
+      className="border border-gold/30 bg-gold/[0.03] rounded-sm p-8 md:p-10 text-center"
+      data-testid="qualified-bootstrap-notice"
+    >
+      <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold mb-3">// system live</div>
+      <h3 className="font-display font-black text-2xl md:text-3xl tracking-tighter mb-3">
+        Building <span className="text-gold">24h snapshot window</span>
+      </h3>
+      <p className="text-white/55 max-w-xl mx-auto text-sm md:text-base mb-6">
+        Holders are snapshotted every hour. Once 24 consecutive snapshots accumulate,
+        every wallet that held ≥ 100 K $ROLLAT in all of them gets entered into the wheel.
+        No bootstrapping with mock data — just patience.
+      </p>
+      <div className="max-w-md mx-auto">
+        <div className="flex justify-between text-[10px] uppercase tracking-[0.2em] font-mono text-white/45 mb-2">
+          <span>Snapshots captured</span>
+          <span className="text-gold">{captured} / {total}</span>
+        </div>
+        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-gold to-gold-hover transition-all duration-500"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
