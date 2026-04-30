@@ -697,10 +697,15 @@ async def websocket_spin(websocket: WebSocket):
 
 app.include_router(api_router)
 
+# CORS: we authenticate via Authorization: Bearer in axios (token in localStorage),
+# never via cookies. allow_credentials=True with allow_origins=* is a spec
+# violation that returns 400 on preflight, so we explicitly set credentials=False
+# and provide a sensible default origin list for when CORS_ORIGINS is unset.
+DEFAULT_CORS_ORIGINS = "https://rollat.vercel.app,https://rollat.xyz,http://localhost:3000"
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_credentials=False,
+    allow_origins=[o.strip() for o in os.environ.get('CORS_ORIGINS', DEFAULT_CORS_ORIGINS).split(',') if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
