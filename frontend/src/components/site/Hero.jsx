@@ -74,7 +74,7 @@ export default function Hero() {
             data-testid="hero-subheadline"
           >
             Hold ≥ 100,000 $ROLLAT for 24 continuous hours. Every snapshot you survive
-            keeps you in the wheel. Every 24 hours, Chainlink VRF picks one wallet —
+            keeps you in the wheel. Every 24 hours, Switchboard VRF picks one wallet —
             the entire pot drops straight into their connected wallet as SOL. No team
             votes. No bias. Just code.
           </motion.p>
@@ -154,7 +154,7 @@ export default function Hero() {
           <div className="mt-12 flex flex-wrap items-center gap-x-8 gap-y-3 text-xs text-white/40 font-mono uppercase tracking-widest">
             <div className="flex items-center gap-2">
               <Sparkles className="w-3 h-3 text-gold" />
-              Chainlink VRF
+              Switchboard VRF
             </div>
             <div>·</div>
             <div>Solana</div>

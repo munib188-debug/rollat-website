@@ -13,7 +13,7 @@ const API = `${BACKEND}/api`;
 // reachable WS endpoint (must be a full ws:// or wss:// URL).
 const WS_URL = process.env.REACT_APP_WS_URL || null;
 
-export const api = axios.create({ baseURL: API });
+export const api = axios.create({ baseURL: API, timeout: 10000 });
 
 // Attach JWT (when present) to every request.
 api.interceptors.request.use((config) => {

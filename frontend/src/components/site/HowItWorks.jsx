@@ -19,7 +19,7 @@ const steps = [
   {
     n: "03",
     title: "VRF Spins",
-    desc: "Chainlink VRF picks one wallet on-chain. Tickets scale with your bag — bigger holders get more shots, capped at 6.",
+    desc: "Switchboard VRF picks one wallet on-chain. Tickets scale with your bag — bigger holders get more shots, capped at 6.",
     icon: Dice5,
     accent: "emerald",
   },

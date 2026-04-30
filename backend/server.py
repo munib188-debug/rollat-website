@@ -5,7 +5,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import random
-import hashlib
 import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -531,15 +530,15 @@ async def dashboard(wallet: str):
     for h in history:
         if isinstance(h.get("won_at"), str):
             h["won_at"] = datetime.fromisoformat(h["won_at"])
-    rng = random.Random(hashlib.sha256(wallet.encode()).hexdigest()[:8])
-    participation = []
-    for r in range(5):
-        participation.append({
-            "round_number": 100 - r,
-            "qualified": rng.random() > 0.3,
-            "tickets": rng.choice([1, 2, 3, 4, 5, 6]),
-            "won": rng.random() > 0.92,
-        })
+    participation = [
+        {
+            "round_number": h["round_number"],
+            "qualified": True,
+            "tickets": h["tickets"],
+            "won": True,
+        }
+        for h in history[:5]
+    ]
     return {
         "status": status.model_dump(),
         "win_history": history,
@@ -569,9 +568,14 @@ async def trigger_spin():
     if doc and doc.get("phase") == "spinning":
         raise HTTPException(status_code=409, detail="Spin already in progress")
 
-    participants = generate_mock_qualified_wallets(347)
+    recent_snaps = await fetch_recent_snapshots(_get_col("holder_snapshots"))
+    if has_sufficient_history(recent_snaps):
+        participants = compute_qualified_wallets(recent_snaps)
+    else:
+        participants = generate_mock_qualified_wallets(50)
+
     now = datetime.now(timezone.utc).isoformat()
-    round_number = (doc.get("round_number", 24) + 1) if doc else 25
+    round_number = (doc.get("round_number", 0) + 1) if doc else 1
 
     await _get_col("spin_state").update_one(
         {"_id": "singleton"},
@@ -601,7 +605,8 @@ async def trigger_spin():
 async def _resolve_after_delay(participants: List[dict], round_number: int, delay: int):
     await asyncio.sleep(delay)
     winner_entry = select_weighted_winner(participants)
-    amount_sol = round(random.uniform(8, 64), 2)
+    pot_sol = await fetch_pot_balance()
+    amount_sol = round(float(pot_sol or 0), 4)
     now = datetime.now(timezone.utc)
 
     winner_data = {

@@ -12,13 +12,13 @@ export default function Vrf() {
             We can't <span className="crimson-text">cheat.</span><br/>Neither can anyone else.
           </h2>
           <p className="text-white/55 text-base md:text-lg leading-relaxed mb-8">
-            Every winner is selected by Chainlink VRF — verifiable randomness generated
-            by a decentralized oracle network. The team has zero control over the outcome.
+            Every winner is selected by Switchboard VRF — verifiable randomness generated
+            by Solana's native oracle network. The team has zero control over the outcome.
             You can audit the request, the proof, and the SOL transfer on-chain.
           </p>
           <div className="space-y-4">
             <Trust icon={ShieldCheck} title="Cryptographic proof" desc="Every random number ships with a proof verifiable on-chain — no trust required." />
-            <Trust icon={Link2} title="Oracle-secured" desc="Backed by Chainlink, securing tens of billions in DeFi value across networks." />
+            <Trust icon={Link2} title="Oracle-secured" desc="Backed by Switchboard, Solana's native oracle network for on-chain randomness." />
             <Trust icon={Eye} title="Open audit" desc="The contract source, every spin, every payout — public and indexed forever." />
           </div>
         </div>
@@ -44,7 +44,7 @@ export default function Vrf() {
             <pre className="p-6 text-[12px] md:text-[13px] font-mono leading-relaxed overflow-auto scrollbar-hidden text-white/80">
 {`// SPDX-License-Identifier: MIT
 contract RollatRoulette is VRFConsumerBaseV2 {
-  uint256 public constant POT_THRESHOLD = 5 ether;
+  uint256 public constant POT_THRESHOLD = 25 ether;
   uint256 public constant MIN_HOLDINGS  = 100_000e9;
   uint256 public constant TICKET_CAP    = 6;
 

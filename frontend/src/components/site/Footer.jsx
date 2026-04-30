@@ -20,7 +20,7 @@ export default function Footer() {
             </div>
             <p className="text-white/45 text-sm leading-relaxed max-w-md mb-6">
               The on-chain roulette. Hold the bag. Survive 24 hours. Win the pot.
-              Powered by Chainlink VRF on Solana.
+              Powered by Switchboard VRF on Solana.
             </p>
             <div className="flex gap-3">
               <Social icon={XIcon} label="x" href="https://x.com/Rollat_online" />
@@ -37,22 +37,22 @@ export default function Footer() {
           ]} />
 
           <FooterCol title="Resources" links={[
+            { label: "Contract", href: "https://solscan.io/token/6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump" },
+            { label: "pump.fun", href: "https://pump.fun/coin/6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump" },
             { label: "Whitepaper", href: "#" },
             { label: "Audit", href: "#" },
-            { label: "Contract", href: "#" },
-            { label: "Brand Kit", href: "#" },
           ]} />
 
           <FooterCol title="Buy $ROLLAT" links={[
-            { label: "Jupiter", href: "#" },
-            { label: "Raydium", href: "#" },
-            { label: "DexScreener", href: "#" },
-            { label: "Birdeye", href: "#" },
+            { label: "Jupiter", href: "https://jup.ag/swap/SOL-6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump" },
+            { label: "Raydium", href: "https://raydium.io/swap/?inputCurrency=sol&outputCurrency=6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump" },
+            { label: "DexScreener", href: "https://dexscreener.com/solana/6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump" },
+            { label: "Birdeye", href: "https://birdeye.so/token/6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump?chain=solana" },
           ]} />
         </div>
 
         <div className="mt-14 pt-6 border-t border-white/5 flex flex-col md:flex-row justify-between gap-4 text-xs text-white/40 font-mono uppercase tracking-widest">
-          <div>© 2025 $ROLLAT · The wheel never sleeps.</div>
+          <div>© 2026 $ROLLAT · The wheel never sleeps.</div>
           <div className="flex gap-6">
             <a href="#" className="hover:text-gold">Terms</a>
             <a href="#" className="hover:text-gold">Privacy</a>

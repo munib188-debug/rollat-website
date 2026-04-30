@@ -24,7 +24,7 @@ export default function WalletCheck() {
   const { publicKey } = useWallet();
   const myAddr = publicKey?.toBase58();
 
-  const sample = "5xq2HnPmK3rT2fG8aNc8nP";
+  const sample = "6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump";
 
   const check = async (input) => {
     const target = (input ?? addr).trim();

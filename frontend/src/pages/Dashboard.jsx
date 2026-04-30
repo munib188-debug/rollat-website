@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-const DEFAULT_WALLET = "5xq2HnPmK3rT2fG8aNc8nP";
+const DEFAULT_WALLET = "";
 const fmtSol = (n) =>
   `${(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} SOL`;
 
@@ -36,7 +36,7 @@ function tierLabel(tickets) {
 
 export default function Dashboard() {
   const [wallet, setWallet] = useState(DEFAULT_WALLET);
-  const [input, setInput] = useState(DEFAULT_WALLET);
+  const [input, setInput] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const stats = useStats();
@@ -60,8 +60,8 @@ export default function Dashboard() {
   const status = data?.status;
 
   const handleClaim = () => {
-    toast.success("SOL transfer broadcasted (mock)", {
-      description: `${fmtSol(stats?.current_pot_sol)} sent directly to ${wallet.slice(0,6)}…${wallet.slice(-4)}`,
+    toast.info("Payout is automatic", {
+      description: "SOL is sent directly to the winner's wallet the moment the spin resolves — no action needed.",
     });
   };
 
@@ -187,7 +187,7 @@ export default function Dashboard() {
                 {fmtSol(stats?.current_pot_sol)}
               </div>
               <div className="text-xs text-white/45 mt-2 font-mono">
-                Threshold: {stats?.pot_threshold_sol ?? 5} SOL · {stats?.rollover_active ? "Rollover ACTIVE" : "Threshold met"}
+                Threshold: {stats?.pot_threshold_sol ?? 25} SOL · {stats?.rollover_active ? "Rollover ACTIVE" : "Threshold met"}
               </div>
             </div>
             <Button
@@ -197,7 +197,7 @@ export default function Dashboard() {
               data-testid="dashboard-claim-btn"
             >
               <Zap className="w-4 h-4 mr-2" />
-              {status?.is_qualified ? "Send Pot to Wallet" : "Locked"}
+              {status?.is_qualified ? "Qualified — Auto-Payout on Win" : "Locked"}
             </Button>
           </div>
         </div>
@@ -290,13 +290,17 @@ export default function Dashboard() {
                 <div className="text-xs text-white/30 font-mono mt-1">Win a round to receive SOL.</div>
               </div>
             )}
-            <a
-              href="#"
-              className="mt-5 flex items-center gap-2 text-xs font-mono text-white/50 hover:text-gold uppercase tracking-widest"
-              data-testid="dashboard-explorer-link"
-            >
-              View on explorer <ExternalLink className="w-3 h-3" />
-            </a>
+            {wallet && (
+              <a
+                href={`https://solscan.io/account/${wallet}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-5 flex items-center gap-2 text-xs font-mono text-white/50 hover:text-gold uppercase tracking-widest"
+                data-testid="dashboard-explorer-link"
+              >
+                View on Solscan <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </div>
         </div>
 

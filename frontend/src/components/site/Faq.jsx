@@ -4,7 +4,7 @@ import { SectionLabel } from "./HowItWorks";
 const faqs = [
   {
     q: "How is a winner actually picked?",
-    a: "Every 24 hours a Chainlink VRF call is triggered. The contract weighs all qualified wallets by their ticket count and the VRF proof selects exactly one. The proof is publicly verifiable on Solana.",
+    a: "Every 24 hours a Switchboard VRF call is triggered. The contract weighs all qualified wallets by their ticket count and the VRF proof selects exactly one. The proof is publicly verifiable on Solana.",
   },
   {
     q: "What's the minimum to qualify?",
@@ -24,7 +24,7 @@ const faqs = [
   },
   {
     q: "Can the team rig the wheel?",
-    a: "No. The contract has no admin override on the VRF outcome. The team can update the keeper schedule, but the random draw is sealed by Chainlink's oracle network.",
+    a: "No. The contract has no admin override on the VRF outcome. The team can update the keeper schedule, but the random draw is sealed by Switchboard's oracle network.",
   },
   {
     q: "What is the recent winner lockout?",

@@ -43,7 +43,7 @@ export default function Tokenomics() {
 
           <div className="mt-8 grid grid-cols-2 gap-4">
             <Metric label="Total Supply" value="1,000,000,000" sub="$ROLLAT" />
-            <Metric label="Pot Threshold" value="5 SOL" sub="rolls over if under" />
+            <Metric label="Pot Threshold" value="25 SOL" sub="rolls over if under" />
           </div>
         </div>
 
