@@ -30,6 +30,13 @@ from onchain import (
     is_configured as onchain_is_configured,
 )
 from snapshots import SnapshotStore
+from qualification import (
+    compute_qualified_wallets,
+    compute_wallet_status,
+    fetch_recent_snapshots,
+    has_sufficient_history,
+    REQUIRED_SNAPSHOTS,
+)
 
 
 ROOT_DIR = Path(__file__).parent
@@ -194,6 +201,8 @@ class QualifiedWalletsResponse(BaseModel):
     total_tickets: int
     page: int
     per_page: int
+    qualification_active: bool = True   # False during the first 24h bootstrap window
+    snapshots_captured: int = 24        # how many of the 24 hourly snapshots exist (saturates at 24)
 
 
 # ---------- WebSocket broadcaster ----------
@@ -429,17 +438,21 @@ async def get_stats():
     spin_phase = spin_doc.get("phase", "idle") if spin_doc else "idle"
     last_winner = spin_doc.get("winner") if spin_doc else None
 
-    # Pull live on-chain numbers in parallel. Fetchers are cached internally so
-    # they are cheap even when /stats is polled every 15s by every client.
-    market, holders = await asyncio.gather(
+    # Pull live on-chain numbers + snapshot history in parallel. All inputs
+    # are cached or indexed so /stats stays fast under polling.
+    market, holders, recent_snaps = await asyncio.gather(
         fetch_token_market_data(),
         fetch_holders_count(),
+        fetch_recent_snapshots(_get_col("holder_snapshots")),
     )
+
+    # Strict qualification: only count wallets when ≥24 snapshots exist.
+    qualified_count = len(compute_qualified_wallets(recent_snaps)) if has_sufficient_history(recent_snaps) else 0
 
     return Stats(
         current_pot_sol=0.0,                    # Real pot tracking lands in Step 6
         next_spin_at=next_spin.isoformat(),
-        total_qualified_wallets=0,              # Real qualification lands in Step 4 + 5
+        total_qualified_wallets=qualified_count,
         total_distributed_sol=round(total_distributed, 2),
         biggest_win_sol=round(biggest, 2),
         spins_completed=spins,
@@ -468,24 +481,33 @@ async def wallet_check(wallet: str):
     if not wallet or len(wallet) < 32 or len(wallet) > 44:
         raise HTTPException(status_code=400, detail="Invalid wallet")
 
-    # Real on-chain balance. 24h-snapshot history lands in Step 4; until then
-    # hours_held=0 / snapshots all-false / is_qualified=false. We still report
-    # the real holdings so users can see whether their bag meets the threshold.
-    holdings = await fetch_wallet_balance(wallet)
-    hours = 0
-    is_qualified = False
-    tickets = 0
-    snapshots = [False] * 24
-    is_recent_winner = False
+    # Live current balance from RPC (what the user holds right now) + snapshot
+    # history (what determines qualification). The two can disagree briefly
+    # right after a buy/sell since snapshots are hourly.
+    holdings, recent_snaps = await asyncio.gather(
+        fetch_wallet_balance(wallet),
+        fetch_recent_snapshots(_get_col("holder_snapshots")),
+    )
+    status = compute_wallet_status(recent_snaps, wallet)
+
+    # Recent-winner lockout (last spin's winner can't qualify next round).
+    last_winner_doc = await _get_col("winners").find_one(
+        {}, {"_id": 0}, sort=[("round_number", -1)]
+    )
+    is_recent_winner = bool(last_winner_doc and last_winner_doc.get("wallet") == wallet)
+
+    is_qualified = status["is_qualified"] and not is_recent_winner
+    next_in = None if is_qualified else max(1, REQUIRED_SNAPSHOTS - status["hours_held"])
+
     return WalletStatus(
         wallet=wallet,
-        is_qualified=is_qualified and not is_recent_winner,
+        is_qualified=is_qualified,
         holdings_tokens=holdings,
-        tickets=tickets,
-        hours_held=hours,
-        snapshots=snapshots,
+        tickets=status["tickets"] if is_qualified else 0,
+        hours_held=status["hours_held"],
+        snapshots=status["snapshots"],
         is_recent_winner=is_recent_winner,
-        next_qualification_in_hours=None if is_qualified else max(1, 24 - hours),
+        next_qualification_in_hours=next_in,
     )
 
 
@@ -619,20 +641,26 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
 
 @api_router.get("/qualified-wallets", response_model=QualifiedWalletsResponse)
 async def get_qualified_wallets(page: int = 1, per_page: int = 50, search: str = ""):
-    all_wallets = generate_mock_qualified_wallets(347)
+    recent_snaps = await fetch_recent_snapshots(_get_col("holder_snapshots"))
+    snapshots_captured = min(len(recent_snaps), REQUIRED_SNAPSHOTS)
+    qualification_active = has_sufficient_history(recent_snaps)
+
+    all_wallets = compute_qualified_wallets(recent_snaps) if qualification_active else []
 
     if search:
-        all_wallets = [w for w in all_wallets if search.lower() in w["wallet"].lower()]
+        s = search.lower()
+        all_wallets = [w for w in all_wallets if s in w["wallet"].lower()]
 
     total = len(all_wallets)
     total_tickets = sum(w["tickets"] for w in all_wallets)
-    start = (page - 1) * per_page
+    start = max(0, (page - 1) * per_page)
     end = start + per_page
     page_wallets = all_wallets[start:end]
 
-    # Add win probability
+    # Add win probability + holdings (using min_balance, the actual qualifying amount)
     for w in page_wallets:
         w["win_probability"] = round((w["tickets"] / total_tickets * 100), 2) if total_tickets > 0 else 0
+        w["holdings"] = w.get("min_balance", 0)
 
     return QualifiedWalletsResponse(
         wallets=page_wallets,
@@ -640,6 +668,8 @@ async def get_qualified_wallets(page: int = 1, per_page: int = 50, search: str =
         total_tickets=total_tickets,
         page=page,
         per_page=per_page,
+        qualification_active=qualification_active,
+        snapshots_captured=snapshots_captured,
     )
 
 
