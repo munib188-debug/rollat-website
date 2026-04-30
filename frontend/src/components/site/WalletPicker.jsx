@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { X, ExternalLink } from "lucide-react";
 
@@ -54,14 +55,15 @@ export default function WalletPicker({ open, onClose }) {
     }
   };
 
-  return (
+  const overlay = (
     <div
-      className="fixed inset-0 z-[200] flex items-start sm:items-center justify-center bg-black/70 backdrop-blur-sm p-4 overflow-y-auto"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       data-testid="wallet-picker-overlay"
       onClick={onClose}
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}
     >
       <div
-        className="relative w-full max-w-md my-auto bg-obsidian-900 border border-white/10 rounded-sm shadow-[0_0_60px_rgba(0,0,0,0.6)] max-h-[calc(100vh-2rem)] flex flex-col"
+        className="relative w-full max-w-md bg-obsidian-900 border border-white/10 rounded-sm shadow-[0_0_60px_rgba(0,0,0,0.6)] max-h-[calc(100vh-2rem)] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
@@ -117,6 +119,8 @@ export default function WalletPicker({ open, onClose }) {
       </div>
     </div>
   );
+
+  return createPortal(overlay, document.body);
 }
 
 function NoWalletsView() {
