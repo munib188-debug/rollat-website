@@ -306,6 +306,18 @@ snapshot_store: Optional[SnapshotStore] = None
 @api_router.on_event("startup")
 async def on_startup():
     global USE_MONGO, nonce_store, snapshot_store
+
+    # Fail fast if JWT_SECRET is missing or too short — auth cannot work safely without it.
+    from auth import JWT_SECRET as _jwt_secret
+    if not _jwt_secret or len(_jwt_secret) < 32:
+        logger.error("FATAL: JWT_SECRET env var is missing or shorter than 32 chars. Set it before deploying.")
+        raise RuntimeError("JWT_SECRET not configured")
+
+    if ADMIN_WALLETS:
+        logger.info(f"Admin wallets configured: {len(ADMIN_WALLETS)}")
+    else:
+        logger.warning("No ADMIN_WALLETS configured — admin endpoints are locked")
+
     try:
         await db.command("ping")
         USE_MONGO = True
@@ -504,6 +516,7 @@ async def get_stats():
 
 @api_router.get("/winners", response_model=List[Winner])
 async def get_winners(limit: int = 20):
+    limit = max(1, min(limit, 100))  # clamp: 1-100
     winners = await _get_col("winners").find({}, {"_id": 0}).sort("round_number", -1).to_list(limit)
     for w in winners:
         if isinstance(w.get("won_at"), str):
@@ -511,10 +524,19 @@ async def get_winners(limit: int = 20):
     return winners
 
 
+def _is_valid_solana_address(addr: str) -> bool:
+    try:
+        import base58 as _b58
+        raw = _b58.b58decode(addr)
+        return len(raw) == 32
+    except Exception:
+        return False
+
+
 @api_router.get("/wallet-check/{wallet}", response_model=WalletStatus)
 async def wallet_check(wallet: str):
-    if not wallet or len(wallet) < 32 or len(wallet) > 44:
-        raise HTTPException(status_code=400, detail="Invalid wallet")
+    if not wallet or not _is_valid_solana_address(wallet):
+        raise HTTPException(status_code=400, detail="Invalid wallet address")
 
     # Live current balance from RPC (what the user holds right now) + snapshot
     # history (what determines qualification). The two can disagree briefly
@@ -588,7 +610,7 @@ async def get_spin_state():
 
 
 @api_router.post("/spin/trigger")
-async def trigger_spin():
+async def trigger_spin(admin: str = Depends(get_admin_wallet)):
     doc = await _get_col("spin_state").find_one({"_id": "singleton"})
     if doc and doc.get("phase") == "spinning":
         raise HTTPException(status_code=409, detail="Spin already in progress")
@@ -682,6 +704,9 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
 
 @api_router.get("/qualified-wallets", response_model=QualifiedWalletsResponse)
 async def get_qualified_wallets(page: int = 1, per_page: int = 50, search: str = ""):
+    page = max(1, page)
+    per_page = max(1, min(per_page, 100))
+    search = search[:50]  # prevent absurdly long search strings
     recent_snaps = await fetch_recent_snapshots(_get_col("holder_snapshots"))
     snapshots_captured = min(len(recent_snaps), REQUIRED_SNAPSHOTS)
     qualification_active = has_sufficient_history(recent_snaps)
@@ -785,9 +810,17 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=False,
     allow_origins=[o.strip() for o in os.environ.get('CORS_ORIGINS', DEFAULT_CORS_ORIGINS).split(',') if o.strip()],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

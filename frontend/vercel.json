@@ -5,5 +5,20 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "https://rollat-website.onrender.com/api/$1" },
     { "source": "/((?!api/).*)", "destination": "/" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://rollat-website.onrender.com wss://rollat-website.onrender.com https://*.helius-rpc.com https://*.solana.com https://api.mainnet-beta.solana.com https://frontend-api-v3.pump.fun; frame-ancestors 'none'"
+        }
+      ]
+    }
   ]
 }
