@@ -46,9 +46,9 @@ export default function Header() {
   };
 
   const links = [
+    { href: "/#mechanics", label: "Mechanics" },
     { href: "/#roulette-arena", label: "Live Spin" },
     { href: "/#dev-roll", label: "Dev Roll" },
-    { href: "/#mechanics", label: "Mechanics" },
     { href: "/#qualified", label: "Qualified" },
     { href: "/#tokenomics", label: "Tokenomics" },
     { href: "/#hall", label: "Hall of Fame" },
