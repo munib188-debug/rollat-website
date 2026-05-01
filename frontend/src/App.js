@@ -3,6 +3,7 @@ import { Component } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Landing from "@/pages/Landing";
 import Dashboard from "@/pages/Dashboard";
+import DevAdmin from "@/pages/DevAdmin";
 import { Toaster } from "@/components/ui/sonner";
 import { SpinPhaseProvider } from "@/lib/SpinPhaseContext";
 import SolanaWalletProvider from "@/lib/SolanaWalletProvider";
@@ -44,6 +45,7 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Landing />} />
                   <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/dev" element={<DevAdmin />} />
                 </Routes>
               </BrowserRouter>
               <Toaster richColors position="top-center" />

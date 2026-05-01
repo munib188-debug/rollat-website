@@ -77,8 +77,8 @@ export async function signInWithSolana(wallet) {
   const sigBytes = await wallet.signMessage(encoded);
   const signature = bs58.encode(sigBytes);
 
-  const { token, address: addr, expires_at } = await postVerify({ address, signature, nonce });
-  const auth = { token, address: addr, expiresAt: expires_at };
+  const { token, address: addr, expires_at, is_admin } = await postVerify({ address, signature, nonce });
+  const auth = { token, address: addr, expiresAt: expires_at, isAdmin: !!is_admin };
   saveAuth(auth);
   return auth;
 }

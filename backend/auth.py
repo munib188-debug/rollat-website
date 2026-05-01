@@ -41,6 +41,16 @@ NONCE_TTL_SECONDS = 300                    # 5 min
 APP_DOMAIN = os.environ.get("APP_DOMAIN", "rollat.vercel.app")
 APP_URI = os.environ.get("APP_URI", "https://rollat.vercel.app")
 
+# Comma-separated list of wallet addresses allowed to use admin-only endpoints
+# (e.g. the Dev Roll feature). Empty by default — feature is locked until set.
+ADMIN_WALLETS = {
+    w.strip() for w in os.environ.get("ADMIN_WALLETS", "").split(",") if w.strip()
+}
+
+
+def is_admin_wallet(addr: str) -> bool:
+    return bool(addr) and addr in ADMIN_WALLETS
+
 # -- pydantic schemas -----------------------------------------------------
 
 class NonceResponse(BaseModel):
@@ -58,10 +68,12 @@ class VerifyResponse(BaseModel):
     token: str
     address: str
     expires_at: str
+    is_admin: bool = False
 
 class MeResponse(BaseModel):
     address: str
     expires_at: str
+    is_admin: bool = False
 
 # -- helpers --------------------------------------------------------------
 
@@ -219,4 +231,12 @@ async def get_current_wallet(
     addr = payload.get("sub")
     if not addr or not _is_valid_solana_address(addr):
         raise HTTPException(status_code=401, detail="malformed token subject")
+    return addr
+
+
+async def get_admin_wallet(addr: str = Depends(get_current_wallet)) -> str:
+    """Like get_current_wallet but additionally requires the wallet be in the
+    ADMIN_WALLETS allowlist. Raises 403 otherwise."""
+    if not is_admin_wallet(addr):
+        raise HTTPException(status_code=403, detail="Admin only")
     return addr

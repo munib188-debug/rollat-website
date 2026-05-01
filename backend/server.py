@@ -21,6 +21,15 @@ from auth import (
     verify_solana_signature,
     issue_jwt,
     get_current_wallet,
+    get_admin_wallet,
+    is_admin_wallet,
+)
+from dev_rolls import (
+    create_dev_roll,
+    cancel_dev_roll,
+    fetch_current_dev_roll,
+    list_dev_rolls,
+    dev_scheduler_loop,
 )
 from onchain import (
     fetch_token_market_data,
@@ -356,6 +365,16 @@ async def on_startup():
             "resolved_at": None,
         })
 
+    # Index for the dev_rolls scheduler (find scheduled rolls by time).
+    try:
+        await _get_col("dev_rolls").create_index([("scheduled_at", 1), ("phase", 1)])
+    except Exception:
+        # in-memory fallback collections don't support indexes
+        pass
+
+    # Background task: scan for due dev rolls every few seconds and run them.
+    asyncio.create_task(dev_scheduler_loop(_get_col))
+
 
 # ---------- Routes ----------
 @api_router.get("/")
@@ -387,14 +406,19 @@ async def auth_verify(req: VerifyRequest):
         raise HTTPException(status_code=401, detail="signature verification failed")
 
     token, exp = issue_jwt(req.address)
-    return VerifyResponse(token=token, address=req.address, expires_at=exp.isoformat())
+    return VerifyResponse(
+        token=token,
+        address=req.address,
+        expires_at=exp.isoformat(),
+        is_admin=is_admin_wallet(req.address),
+    )
 
 
 @api_router.get("/auth/me", response_model=MeResponse)
 async def auth_me(address: str = Depends(get_current_wallet)):
     """Returns the wallet bound to the current JWT. Useful for client to verify a token is still valid."""
     # exp isn't stored separately; client can decode jti/exp itself, but echoing the address proves authenticity
-    return MeResponse(address=address, expires_at="")
+    return MeResponse(address=address, expires_at="", is_admin=is_admin_wallet(address))
 
 
 @api_router.get("/snapshots/status")
@@ -687,6 +711,55 @@ async def get_qualified_wallets(page: int = 1, per_page: int = 50, search: str =
         qualification_active=qualification_active,
         snapshots_captured=snapshots_captured,
     )
+
+
+# ---------- Dev Roll (admin-only setup, public live view) ----------
+
+class DevRollCreateRequest(BaseModel):
+    wallets: List[str]
+    pot_sol: float
+    scheduled_at: str  # ISO 8601 with timezone
+
+
+def _parse_scheduled_at(raw: str) -> datetime:
+    try:
+        # Accept "...Z" suffix as UTC for browser <input type="datetime-local"> + manual UTC use.
+        cleaned = raw.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(cleaned)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="scheduled_at must be a valid ISO 8601 datetime")
+    if dt.tzinfo is None:
+        # Assume UTC when caller didn't specify (matches the form's UTC-only label)
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+@api_router.post("/dev/roll")
+async def dev_roll_create(req: DevRollCreateRequest, admin: str = Depends(get_admin_wallet)):
+    sched = _parse_scheduled_at(req.scheduled_at)
+    return await create_dev_roll(
+        _get_col("dev_rolls"),
+        wallets=req.wallets,
+        pot_sol=req.pot_sol,
+        scheduled_at=sched,
+        created_by=admin,
+    )
+
+
+@api_router.get("/dev/roll/current")
+async def dev_roll_current():
+    """Public — returns the active or recently-resolved dev roll, or null."""
+    return await fetch_current_dev_roll(_get_col("dev_rolls"))
+
+
+@api_router.delete("/dev/roll/{roll_id}")
+async def dev_roll_cancel(roll_id: str, admin: str = Depends(get_admin_wallet)):
+    return await cancel_dev_roll(_get_col("dev_rolls"), roll_id)
+
+
+@api_router.get("/dev/rolls")
+async def dev_rolls_history(admin: str = Depends(get_admin_wallet)):
+    return await list_dev_rolls(_get_col("dev_rolls"), limit=50)
 
 
 # ---------- WebSocket ----------

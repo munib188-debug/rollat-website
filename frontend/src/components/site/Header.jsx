@@ -13,7 +13,7 @@ export default function Header() {
   const loc = useLocation();
   const { publicKey, wallet, disconnect, connecting } = useWallet();
   const [pickerOpen, setPickerOpen] = useState(false);
-  const { isAuthenticated, signIn, signOut, signingIn } = useAuth();
+  const { isAuthenticated, isAdmin, signIn, signOut, signingIn } = useAuth();
 
   const connected = !!publicKey;
   const addr = publicKey?.toBase58();
@@ -90,6 +90,19 @@ export default function Header() {
               Dashboard
             </Button>
           </Link>
+          {isAdmin && (
+            <Link to="/dev">
+              <Button
+                variant="outline"
+                className="border-crimson/40 text-crimson hover:bg-crimson/10 hover:text-crimson font-bold uppercase tracking-widest text-xs rounded-sm h-9 px-3"
+                data-testid="header-dev-btn"
+                title="Dev Roll admin (admin wallet only)"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
+                Dev
+              </Button>
+            </Link>
+          )}
           {showSignIn && (
             <Button
               onClick={handleSignIn}
@@ -151,6 +164,9 @@ export default function Header() {
             </a>
           ))}
           <Link to="/dashboard" onClick={() => setOpen(false)} className="text-white/70">Dashboard</Link>
+          {isAdmin && (
+            <Link to="/dev" onClick={() => setOpen(false)} className="text-crimson font-bold">Dev Roll · Admin</Link>
+          )}
           {showSignIn && (
             <Button
               onClick={() => { handleSignIn(); setOpen(false); }}
