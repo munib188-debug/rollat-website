@@ -47,6 +47,7 @@ export default function Header() {
 
   const links = [
     { href: "/#roulette-arena", label: "Live Spin" },
+    { href: "/#dev-roll", label: "Dev Roll" },
     { href: "/#mechanics", label: "Mechanics" },
     { href: "/#qualified", label: "Qualified" },
     { href: "/#tokenomics", label: "Tokenomics" },
