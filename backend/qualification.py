@@ -15,6 +15,11 @@ from typing import Optional
 MIN_QUALIFYING_TOKENS = 100_000
 REQUIRED_SNAPSHOTS = 24
 
+# Wallets permanently excluded from qualification and spin pool (e.g. liquidity pool).
+EXCLUDED_WALLETS: frozenset[str] = frozenset({
+    "554wf8HbkcPJZn12kxDGUVgX75fA1btkpzuAcjrBDrRK",  # liquidity pool
+})
+
 
 def tickets_for_holdings(tokens: float) -> int:
     """Same tier table the website's TierRow display advertises."""
@@ -54,7 +59,8 @@ def compute_qualified_wallets(snapshots: list) -> list[dict]:
     balance_per_snap = [_balance_lookup(s) for s in window]
 
     # Only wallets present in the most-recent snapshot can possibly qualify.
-    candidates = list(balance_per_snap[0].keys())
+    # Strip any permanently-excluded addresses (LP, team, etc.).
+    candidates = [w for w in balance_per_snap[0].keys() if w not in EXCLUDED_WALLETS]
 
     qualified: list[dict] = []
     for wallet in candidates:

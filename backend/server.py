@@ -45,6 +45,7 @@ from qualification import (
     fetch_recent_snapshots,
     has_sufficient_history,
     REQUIRED_SNAPSHOTS,
+    EXCLUDED_WALLETS,
 )
 
 
@@ -530,7 +531,7 @@ async def wallet_check(wallet: str):
     )
     is_recent_winner = bool(last_winner_doc and last_winner_doc.get("wallet") == wallet)
 
-    is_qualified = status["is_qualified"] and not is_recent_winner
+    is_qualified = status["is_qualified"] and not is_recent_winner and wallet not in EXCLUDED_WALLETS
     next_in = None if is_qualified else max(1, REQUIRED_SNAPSHOTS - status["hours_held"])
 
     return WalletStatus(

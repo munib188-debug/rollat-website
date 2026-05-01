@@ -42,6 +42,27 @@ export function AuthProvider({ children }) {
     }
   }, [wallet.publicKey, auth]);
 
+  // Auto sign-in: as soon as a wallet connects (and we're not already signed
+  // in for this address), kick off SIWS silently. The user approves in their
+  // wallet popup — no extra button needed.
+  useEffect(() => {
+    const connectedAddr = wallet.publicKey?.toBase58();
+    if (!connectedAddr) return;                        // not connected
+    if (auth?.address === connectedAddr) return;       // already signed in
+    if (signingIn) return;                             // already in progress
+    if (!wallet.signMessage) return;                   // adapter not ready
+
+    let cancelled = false;
+    setSigningIn(true);
+    signInWithSolana(wallet)
+      .then((next) => { if (!cancelled) setAuth(next); })
+      .catch(() => {})  // user rejected or locked wallet — silently ignore
+      .finally(() => { if (!cancelled) setSigningIn(false); });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet.publicKey]);
+
   // Auto-expire on TTL
   useEffect(() => {
     if (!auth?.expiresAt) return;

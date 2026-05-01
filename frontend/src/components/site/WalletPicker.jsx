@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { X, ExternalLink } from "lucide-react";
+import { X, ExternalLink, AlertCircle } from "lucide-react";
 
 const INSTALL_LINKS = [
   { name: "Phantom",  url: "https://phantom.com/download" },
@@ -11,6 +11,8 @@ const INSTALL_LINKS = [
 
 export default function WalletPicker({ open, onClose }) {
   const { wallets, select, connect } = useWallet();
+  const [error, setError] = useState(null);
+  const [connecting, setConnecting] = useState(null); // wallet name being connected
 
   // Lock body scroll while open
   useEffect(() => {
@@ -28,6 +30,11 @@ export default function WalletPicker({ open, onClose }) {
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
+  // Reset state when re-opened
+  useEffect(() => {
+    if (open) { setError(null); setConnecting(null); }
+  }, [open]);
+
   if (!open) return null;
 
   const detected = wallets.filter(
@@ -35,23 +42,26 @@ export default function WalletPicker({ open, onClose }) {
   );
 
   const pick = async (walletName) => {
+    setError(null);
+    setConnecting(walletName);
     try {
       select(walletName);
-      // Defer one tick so the WalletProvider commits the selection
-      // before we ask the adapter to connect — without this, connect()
-      // can fire before `wallet` is set and the popup never appears.
-      setTimeout(() => {
-        connect().catch((err) => {
-          // Surface any connection error in the console for diagnostics.
-          // Common ones: user rejected, wallet locked, popup blocked.
-          // eslint-disable-next-line no-console
-          console.error("[wallet] connect failed:", err);
-        });
-      }, 0);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await connect();
       onClose();
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[wallet] select failed:", err);
+      console.error("[wallet] connect failed:", err);
+      const msg = err?.message || "";
+      if (msg.toLowerCase().includes("user rejected") || msg.toLowerCase().includes("cancelled")) {
+        setError("Connection cancelled. Unlock your wallet and try again.");
+      } else if (msg.toLowerCase().includes("popup")) {
+        setError("Popup was blocked. Allow popups for this site and try again.");
+      } else {
+        setError("Connection failed. Make sure your wallet is unlocked and try again.");
+      }
+    } finally {
+      setConnecting(null);
     }
   };
 
@@ -81,34 +91,44 @@ export default function WalletPicker({ open, onClose }) {
         </div>
 
         <div className="p-4 overflow-y-auto flex-1 min-h-0">
+          {error && (
+            <div className="mb-3 flex items-start gap-2.5 px-3 py-2.5 rounded-sm bg-crimson/10 border border-crimson/30 text-sm text-crimson">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              {error}
+            </div>
+          )}
           {detected.length === 0 ? (
             <NoWalletsView />
           ) : (
             <ul className="space-y-2">
-              {detected.map((w) => (
-                <li key={w.adapter.name}>
-                  <button
-                    onClick={() => pick(w.adapter.name)}
-                    className="w-full flex items-center gap-4 p-3 rounded-sm border border-white/5 hover:border-gold/40 hover:bg-white/[0.03] transition-colors group"
-                    data-testid={`wallet-${w.adapter.name.toLowerCase()}`}
-                  >
-                    {w.adapter.icon ? (
-                      <img src={w.adapter.icon} alt="" className="w-9 h-9 rounded-sm" />
-                    ) : (
-                      <div className="w-9 h-9 rounded-sm bg-white/5" />
-                    )}
-                    <div className="flex-1 text-left">
-                      <div className="font-bold text-white">{w.adapter.name}</div>
-                      <div className="text-xs text-white/40 font-mono uppercase tracking-widest">
-                        {w.readyState === "Installed" ? "Detected" : "Available"}
+              {detected.map((w) => {
+                const isConnecting = connecting === w.adapter.name;
+                return (
+                  <li key={w.adapter.name}>
+                    <button
+                      onClick={() => pick(w.adapter.name)}
+                      disabled={!!connecting}
+                      className="w-full flex items-center gap-4 p-3 rounded-sm border border-white/5 hover:border-gold/40 hover:bg-white/[0.03] transition-colors group disabled:opacity-50 disabled:cursor-wait"
+                      data-testid={`wallet-${w.adapter.name.toLowerCase()}`}
+                    >
+                      {w.adapter.icon ? (
+                        <img src={w.adapter.icon} alt="" className="w-9 h-9 rounded-sm" />
+                      ) : (
+                        <div className="w-9 h-9 rounded-sm bg-white/5" />
+                      )}
+                      <div className="flex-1 text-left">
+                        <div className="font-bold text-white">{w.adapter.name}</div>
+                        <div className="text-xs text-white/40 font-mono uppercase tracking-widest">
+                          {isConnecting ? "Connecting…" : w.readyState === "Installed" ? "Detected" : "Available"}
+                        </div>
                       </div>
-                    </div>
-                    <span className="text-[10px] uppercase tracking-widest font-mono text-white/30 group-hover:text-gold">
-                      Connect →
-                    </span>
-                  </button>
-                </li>
-              ))}
+                      <span className="text-[10px] uppercase tracking-widest font-mono text-white/30 group-hover:text-gold">
+                        {isConnecting ? "…" : "Connect →"}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
