@@ -40,7 +40,7 @@ MAX_POT_SOL = 10_000.0
 
 # How long the resolved winner card lingers on the public page after the spin
 # finishes. After this window elapses, /dev/roll/current returns null again.
-RESOLVED_DISPLAY_SECS = 60
+RESOLVED_DISPLAY_SECS = 300
 
 
 # ---------- model ----------
@@ -50,6 +50,7 @@ class DevRoll(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: Optional[str] = None           # e.g. "Community Giveaway #3"
     wallets: List[str]
     pot_sol: float
     scheduled_at: datetime
@@ -134,11 +135,14 @@ async def has_active_roll(col) -> bool:
 async def create_dev_roll(
     col,
     *,
+    title: Optional[str] = None,
     wallets: List[str],
     pot_sol: float,
     scheduled_at: datetime,
     created_by: str,
 ) -> dict:
+    if title is not None:
+        title = str(title).strip()[:60] or None  # max 60 chars, blank becomes None
     cleaned = validate_wallets(wallets)
 
     try:
@@ -157,6 +161,7 @@ async def create_dev_roll(
         raise HTTPException(status_code=400, detail="another dev roll is already active — cancel it first")
 
     roll = DevRoll(
+        title=title,
         wallets=cleaned,
         pot_sol=pot_value,
         scheduled_at=sched,

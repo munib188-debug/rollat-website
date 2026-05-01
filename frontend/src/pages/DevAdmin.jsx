@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Wallet, Calendar, Coins, Trash2, ShieldAlert, ShieldCheck, Pen } from "lucide-react";
+import { ArrowLeft, Wallet, Calendar, Coins, Trash2, ShieldAlert, ShieldCheck, Pen, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useAuth } from "@/lib/AuthContext";
@@ -30,6 +30,7 @@ export default function DevAdmin() {
   const { isAuthenticated, isAdmin, signIn, signingIn, signOut } = useAuth();
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  const [title, setTitle] = useState("");
   const [walletsRaw, setWalletsRaw] = useState("");
   const [pot, setPot] = useState("1");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -98,11 +99,13 @@ export default function DevAdmin() {
     setSubmitting(true);
     try {
       await api.post("/dev/roll", {
+        title: title.trim() || undefined,
         wallets,
         pot_sol: potNum,
         scheduled_at: iso,
       });
       toast.success("Dev roll scheduled");
+      setTitle("");
       setWalletsRaw("");
       setPot("1");
       setScheduledAt("");
@@ -219,6 +222,7 @@ export default function DevAdmin() {
             </div>
 
             <SetupForm
+              title={title} setTitle={setTitle}
               walletsRaw={walletsRaw} setWalletsRaw={setWalletsRaw}
               pot={pot} setPot={setPot}
               scheduledAt={scheduledAt} setScheduledAt={setScheduledAt}
@@ -254,7 +258,7 @@ function Gate({ title, description, action, danger }) {
   );
 }
 
-function SetupForm({ walletsRaw, setWalletsRaw, pot, setPot, scheduledAt, setScheduledAt, submitting, onSubmit }) {
+function SetupForm({ title, setTitle, walletsRaw, setWalletsRaw, pot, setPot, scheduledAt, setScheduledAt, submitting, onSubmit }) {
   const wallets = walletsRaw
     .split(/[\s,;\n]+/)
     .map((w) => w.trim())
@@ -265,6 +269,20 @@ function SetupForm({ walletsRaw, setWalletsRaw, pot, setPot, scheduledAt, setSch
   return (
     <div className="glass rounded-sm p-7 md:p-10 mb-10" data-testid="dev-admin-form">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-3">
+          <Label icon={<Tag className="w-3.5 h-3.5" />} text="Roll Title (optional)" />
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value.slice(0, 60))}
+            placeholder="e.g. Community Giveaway #3"
+            maxLength={60}
+            className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm placeholder:text-white/25"
+            data-testid="dev-admin-title"
+          />
+          <div className="text-[11px] font-mono text-white/35 mt-2">
+            Shown as the section heading on the live page. {title.length}/60
+          </div>
+        </div>
         <div className="lg:col-span-3">
           <Label icon={<Wallet className="w-3.5 h-3.5" />} text="Wallet Pool" />
           <textarea

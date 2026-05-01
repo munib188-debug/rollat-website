@@ -4,6 +4,7 @@ import { Gift, Sparkles, Trophy, Clock, ExternalLink, Copy } from "lucide-react"
 import { useDevRoll } from "@/lib/useDevRoll";
 import { useCountdown, pad } from "@/lib/useCountdown";
 import { SectionLabel } from "./HowItWorks";
+import { launchConfetti } from "@/lib/confetti";
 
 // Crimson is the dev-roll signature color so it doesn't read as a duplicate of
 // the gold main wheel.
@@ -27,7 +28,10 @@ export default function DevRollArena() {
         <DevSectionLabel />
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-10">
           <h2 className="font-display font-black text-4xl md:text-5xl tracking-tighter">
-            Dev <span style={{ color: ACCENT }}>Roll.</span>
+            {roll?.title
+              ? <><span style={{ color: ACCENT }}>{roll.title}</span></>
+              : <>Dev <span style={{ color: ACCENT }}>Roll.</span></>
+            }
           </h2>
           <PhasePill phase={phase} />
         </div>
@@ -293,12 +297,24 @@ function SpinningView({ roll }) {
 function ResolvedView({ roll }) {
   const winner = roll.winner;
   const explorer = winner ? `https://solscan.io/account/${winner}` : "#";
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const cleanup = launchConfetti(canvasRef.current, 4500);
+    return () => cleanup?.();
+  }, []);
+
   return (
     <div
       className="glass rounded-sm p-8 md:p-12 relative overflow-hidden"
       style={{ borderColor: `${ACCENT}40` }}
       data-testid="dev-roll-winner"
     >
+      <canvas
+        ref={canvasRef}
+        className="fixed inset-0 pointer-events-none"
+        style={{ zIndex: 9999 }}
+      />
       <div
         className="absolute inset-0 pointer-events-none"
         style={{

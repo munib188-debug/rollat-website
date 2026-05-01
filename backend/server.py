@@ -23,6 +23,7 @@ from auth import (
     get_current_wallet,
     get_admin_wallet,
     is_admin_wallet,
+    ADMIN_WALLETS,
 )
 from dev_rolls import (
     create_dev_roll,
@@ -742,6 +743,7 @@ async def get_qualified_wallets(page: int = 1, per_page: int = 50, search: str =
 # ---------- Dev Roll (admin-only setup, public live view) ----------
 
 class DevRollCreateRequest(BaseModel):
+    title: Optional[str] = None  # e.g. "Community Giveaway #3" (max 60 chars)
     wallets: List[str]
     pot_sol: float
     scheduled_at: str  # ISO 8601 with timezone
@@ -765,6 +767,7 @@ async def dev_roll_create(req: DevRollCreateRequest, admin: str = Depends(get_ad
     sched = _parse_scheduled_at(req.scheduled_at)
     return await create_dev_roll(
         _get_col("dev_rolls"),
+        title=req.title,
         wallets=req.wallets,
         pot_sol=req.pot_sol,
         scheduled_at=sched,
