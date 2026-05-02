@@ -32,6 +32,10 @@ from dev_rolls import (
     list_dev_rolls,
     dev_scheduler_loop,
 )
+from telegram_bot import (
+    announce_daily_spin_started,
+    announce_daily_spin_winner,
+)
 from onchain import (
     fetch_token_market_data,
     fetch_holders_count,
@@ -645,6 +649,13 @@ async def trigger_spin(admin: str = Depends(get_admin_wallet)):
         "participants_count": len(participants),
     })
 
+    pot_sol_now = await fetch_pot_balance()
+    asyncio.create_task(announce_daily_spin_started(
+        round_number=round_number,
+        participants_count=len(participants),
+        pot_sol=round(float(pot_sol_now or 0), 4),
+    ))
+
     # Resolve after animation time (10s)
     asyncio.create_task(_resolve_after_delay(participants, round_number, 10))
     return {"status": "spinning", "round": round_number, "participants": len(participants)}
@@ -690,6 +701,13 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
         "round": round_number,
         "winner": winner_data,
     })
+
+    asyncio.create_task(announce_daily_spin_winner(
+        round_number=round_number,
+        winner_wallet=winner_entry["wallet"],
+        amount_sol=amount_sol,
+        participants_count=len(participants),
+    ))
 
     # Return to idle after 30s
     await asyncio.sleep(30)

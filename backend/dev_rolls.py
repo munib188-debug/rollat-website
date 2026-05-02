@@ -27,6 +27,11 @@ from typing import List, Optional
 import base58
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from telegram_bot import (
+    announce_dev_roll_scheduled,
+    announce_dev_roll_spinning,
+    announce_dev_roll_winner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +175,14 @@ async def create_dev_roll(
     doc = roll.model_dump()
     # Mongo motor handles datetime natively; nothing to coerce.
     await col.insert_one(doc)
-    return _normalize_doc(doc)
+    normalized = _normalize_doc(doc)
+    asyncio.create_task(announce_dev_roll_scheduled(
+        title=title,
+        pot_sol=pot_value,
+        wallet_count=len(cleaned),
+        scheduled_at_iso=normalized.get("scheduled_at", ""),
+    ))
+    return normalized
 
 
 async def cancel_dev_roll(col, roll_id: str) -> dict:
@@ -235,6 +247,11 @@ async def _resolve_one_roll(col, roll: dict) -> None:
         return
 
     logger.info(f"[dev_roll] spinning roll {roll_id} ({len(refreshed['wallets'])} wallets, pot={refreshed['pot_sol']})")
+    asyncio.create_task(announce_dev_roll_spinning(
+        title=refreshed.get("title"),
+        pot_sol=refreshed["pot_sol"],
+        wallet_count=len(refreshed["wallets"]),
+    ))
 
     # Suspense window matches the public widget's animation duration.
     await asyncio.sleep(DEV_SPIN_ANIMATION_SECS)
@@ -246,6 +263,11 @@ async def _resolve_one_roll(col, roll: dict) -> None:
         {"$set": {"phase": "resolved", "winner": winner, "resolved_at": resolved_at}},
     )
     logger.info(f"[dev_roll] resolved roll {roll_id} -> {winner}")
+    asyncio.create_task(announce_dev_roll_winner(
+        title=refreshed.get("title"),
+        winner_wallet=winner,
+        pot_sol=refreshed["pot_sol"],
+    ))
 
 
 async def run_due_rolls(col) -> int:
