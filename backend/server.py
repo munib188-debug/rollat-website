@@ -37,6 +37,7 @@ from telegram_bot import (
     announce_daily_spin_winner,
     announce_daily_spin_reminder,
     announce_rollover,
+    announce_buy_cta,
 )
 from onchain import (
     fetch_token_market_data,
@@ -765,6 +766,7 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
         amount_sol=amount_sol,
         participants_count=len(participants),
     ))
+    asyncio.create_task(announce_buy_cta())
 
     # Return to idle after 30s
     await asyncio.sleep(30)

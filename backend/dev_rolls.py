@@ -32,6 +32,7 @@ from telegram_bot import (
     announce_dev_roll_spinning,
     announce_dev_roll_winner,
     announce_dev_roll_reminder,
+    announce_buy_cta,
 )
 
 logger = logging.getLogger(__name__)
@@ -270,6 +271,7 @@ async def _resolve_one_roll(col, roll: dict) -> None:
         winner_wallet=winner,
         pot_sol=refreshed["pot_sol"],
     ))
+    asyncio.create_task(announce_buy_cta())
 
 
 async def run_due_rolls(col) -> int:

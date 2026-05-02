@@ -171,3 +171,16 @@ async def announce_daily_spin_winner(
         f"[View on Solscan]({explorer})\n\n"
         f"{SITE}"
     )
+
+
+async def announce_buy_cta() -> None:
+    """Sent after every winner reveal to drive buys."""
+    await _send(
+        f"💎 *Want to be next?*\n\n"
+        f"Hold `100K+ $ROLLAT` for 24h and your wallet enters the next spin\\.\n"
+        f"Every round, one holder takes the entire SOL pot\\.\n\n"
+        f"🪙 Buy \\$ROLLAT on pump\\.fun:\n"
+        f"pump\\.fun/coin/6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump\n\n"
+        f"CA: `6nkpP9ZZL2M3S9AFERydn3wxhzTMC2Dto72N6yK3pump`\n"
+        f"📊 {SITE} · 🐦 @Rollat\\_online"
+    )
