@@ -188,6 +188,59 @@ async def create_dev_roll(
     return normalized
 
 
+async def update_dev_roll(
+    col,
+    roll_id: str,
+    *,
+    wallets_to_add: Optional[List[str]] = None,
+    title: Optional[str] = None,
+    pot_sol: Optional[float] = None,
+    scheduled_at: Optional[datetime] = None,
+) -> dict:
+    """Edit a still-scheduled roll. Wallets are *appended* (deduplicated)."""
+    doc = await col.find_one({"id": roll_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="roll not found")
+    if doc.get("phase") != "scheduled":
+        raise HTTPException(status_code=400, detail=f"cannot edit a roll in phase '{doc.get('phase')}'")
+
+    updates: dict = {}
+
+    if wallets_to_add is not None:
+        new_validated = validate_wallets(wallets_to_add)
+        existing = doc.get("wallets", [])
+        merged = list(dict.fromkeys(existing + new_validated))
+        if len(merged) > 500:
+            raise HTTPException(status_code=400, detail="too many wallets (max 500)")
+        updates["wallets"] = merged
+
+    if title is not None:
+        updates["title"] = str(title).strip()[:60] or None
+
+    if pot_sol is not None:
+        try:
+            pot_value = float(pot_sol)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="pot_sol must be a number")
+        if pot_value < 0 or pot_value > MAX_POT_SOL:
+            raise HTTPException(status_code=400, detail=f"pot_sol must be 0–{MAX_POT_SOL}")
+        updates["pot_sol"] = pot_value
+
+    if scheduled_at is not None:
+        sched = _ensure_utc(scheduled_at)
+        if sched <= datetime.now(timezone.utc) + timedelta(seconds=5):
+            raise HTTPException(status_code=400, detail="scheduled_at must be at least 5 seconds in the future")
+        updates["scheduled_at"] = sched
+        updates["ten_min_warned"] = False  # reset so the reminder fires again at the new time
+
+    if not updates:
+        return _normalize_doc(doc)
+
+    await col.update_one({"id": roll_id}, {"$set": updates})
+    updated = await col.find_one({"id": roll_id})
+    return _normalize_doc(updated)
+
+
 async def cancel_dev_roll(col, roll_id: str) -> dict:
     doc = await col.find_one({"id": roll_id})
     if not doc:

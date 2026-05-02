@@ -27,6 +27,7 @@ from auth import (
 )
 from dev_rolls import (
     create_dev_roll,
+    update_dev_roll,
     cancel_dev_roll,
     fetch_current_dev_roll,
     list_dev_rolls,
@@ -826,6 +827,13 @@ class DevRollCreateRequest(BaseModel):
     scheduled_at: str  # ISO 8601 with timezone
 
 
+class DevRollUpdateRequest(BaseModel):
+    wallets_to_add: Optional[List[str]] = None  # appended + deduped
+    title: Optional[str] = None
+    pot_sol: Optional[float] = None
+    scheduled_at: Optional[str] = None  # ISO 8601 with timezone
+
+
 def _parse_scheduled_at(raw: str) -> datetime:
     try:
         # Accept "...Z" suffix as UTC for browser <input type="datetime-local"> + manual UTC use.
@@ -856,6 +864,19 @@ async def dev_roll_create(req: DevRollCreateRequest, admin: str = Depends(get_ad
 async def dev_roll_current():
     """Public — returns the active or recently-resolved dev roll, or null."""
     return await fetch_current_dev_roll(_get_col("dev_rolls"))
+
+
+@api_router.patch("/dev/roll/{roll_id}")
+async def dev_roll_update(roll_id: str, req: DevRollUpdateRequest, admin: str = Depends(get_admin_wallet)):
+    sched = _parse_scheduled_at(req.scheduled_at) if req.scheduled_at else None
+    return await update_dev_roll(
+        _get_col("dev_rolls"),
+        roll_id,
+        wallets_to_add=req.wallets_to_add,
+        title=req.title,
+        pot_sol=req.pot_sol,
+        scheduled_at=sched,
+    )
 
 
 @api_router.delete("/dev/roll/{roll_id}")

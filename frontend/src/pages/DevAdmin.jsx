@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Wallet, Calendar, Coins, Trash2, ShieldAlert, ShieldCheck, Pen, Tag } from "lucide-react";
+import { ArrowLeft, Wallet, Calendar, Coins, Trash2, ShieldAlert, ShieldCheck, Pen, Tag, Timer, PlusCircle, Save, X } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useAuth } from "@/lib/AuthContext";
@@ -33,6 +33,9 @@ export default function DevAdmin() {
   const [title, setTitle] = useState("");
   const [walletsRaw, setWalletsRaw] = useState("");
   const [pot, setPot] = useState("1");
+  const [schedMode, setSchedMode] = useState("timer"); // "timer" | "datetime"
+  const [timerHours, setTimerHours] = useState("1");
+  const [timerMinutes, setTimerMinutes] = useState("0");
   const [scheduledAt, setScheduledAt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [current, setCurrent] = useState(null);
@@ -90,10 +93,16 @@ export default function DevAdmin() {
       toast.error("Pot must be a non-negative number");
       return;
     }
-    const iso = localUtcInputToIso(scheduledAt);
-    if (!iso) {
-      toast.error("Pick a UTC date & time for the spin");
-      return;
+    let iso;
+    if (schedMode === "timer") {
+      const h = Math.max(0, parseInt(timerHours) || 0);
+      const m = Math.max(0, parseInt(timerMinutes) || 0);
+      const totalSecs = h * 3600 + m * 60;
+      if (totalSecs < 30) { toast.error("Timer must be at least 30 seconds"); return; }
+      iso = new Date(Date.now() + totalSecs * 1000).toISOString();
+    } else {
+      iso = localUtcInputToIso(scheduledAt);
+      if (!iso) { toast.error("Pick a UTC date & time for the spin"); return; }
     }
 
     setSubmitting(true);
@@ -108,6 +117,8 @@ export default function DevAdmin() {
       setTitle("");
       setWalletsRaw("");
       setPot("1");
+      setTimerHours("1");
+      setTimerMinutes("0");
       setScheduledAt("");
       await refresh();
     } catch (err) {
@@ -225,11 +236,14 @@ export default function DevAdmin() {
               title={title} setTitle={setTitle}
               walletsRaw={walletsRaw} setWalletsRaw={setWalletsRaw}
               pot={pot} setPot={setPot}
+              schedMode={schedMode} setSchedMode={setSchedMode}
+              timerHours={timerHours} setTimerHours={setTimerHours}
+              timerMinutes={timerMinutes} setTimerMinutes={setTimerMinutes}
               scheduledAt={scheduledAt} setScheduledAt={setScheduledAt}
               submitting={submitting} onSubmit={handleSubmit}
             />
 
-            <CurrentRoll roll={current} onCancel={handleCancel} />
+            <CurrentRoll roll={current} onCancel={handleCancel} onRefresh={refresh} />
 
             <HistoryList history={history} loading={loadingList} />
           </>
@@ -258,17 +272,34 @@ function Gate({ title, description, action, danger }) {
   );
 }
 
-function SetupForm({ title, setTitle, walletsRaw, setWalletsRaw, pot, setPot, scheduledAt, setScheduledAt, submitting, onSubmit }) {
-  const wallets = walletsRaw
-    .split(/[\s,;\n]+/)
-    .map((w) => w.trim())
-    .filter(Boolean);
+function SetupForm({
+  title, setTitle,
+  walletsRaw, setWalletsRaw,
+  pot, setPot,
+  schedMode, setSchedMode,
+  timerHours, setTimerHours,
+  timerMinutes, setTimerMinutes,
+  scheduledAt, setScheduledAt,
+  submitting, onSubmit,
+}) {
+  const wallets = walletsRaw.split(/[\s,;\n]+/).map((w) => w.trim()).filter(Boolean);
   const validCount = wallets.filter((w) => isValidSolanaAddress(w)).length;
   const invalidCount = wallets.length - validCount;
+
+  // Live preview of the computed spin time for the timer mode
+  const timerPreview = (() => {
+    const h = Math.max(0, parseInt(timerHours) || 0);
+    const m = Math.max(0, parseInt(timerMinutes) || 0);
+    const totalSecs = h * 3600 + m * 60;
+    if (totalSecs < 30) return null;
+    return new Date(Date.now() + totalSecs * 1000).toUTCString();
+  })();
 
   return (
     <div className="glass rounded-sm p-7 md:p-10 mb-10" data-testid="dev-admin-form">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Title */}
         <div className="lg:col-span-3">
           <Label icon={<Tag className="w-3.5 h-3.5" />} text="Roll Title (optional)" />
           <Input
@@ -279,10 +310,10 @@ function SetupForm({ title, setTitle, walletsRaw, setWalletsRaw, pot, setPot, sc
             className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm placeholder:text-white/25"
             data-testid="dev-admin-title"
           />
-          <div className="text-[11px] font-mono text-white/35 mt-2">
-            Shown as the section heading on the live page. {title.length}/60
-          </div>
+          <div className="text-[11px] font-mono text-white/35 mt-2">{title.length}/60</div>
         </div>
+
+        {/* Wallet Pool */}
         <div className="lg:col-span-3">
           <Label icon={<Wallet className="w-3.5 h-3.5" />} text="Wallet Pool" />
           <textarea
@@ -300,35 +331,78 @@ function SetupForm({ title, setTitle, walletsRaw, setWalletsRaw, pot, setPot, sc
           </div>
         </div>
 
+        {/* Pot */}
         <div>
           <Label icon={<Coins className="w-3.5 h-3.5" />} text="Announced Pot (SOL)" />
           <Input
             value={pot}
             onChange={(e) => setPot(e.target.value)}
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="1.0"
+            type="number" min="0" step="0.01" placeholder="1.0"
             className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm"
             data-testid="dev-admin-pot"
           />
-          <div className="text-[11px] font-mono text-white/35 mt-2">
-            Display only — payment is settled by you outside the app.
-          </div>
+          <div className="text-[11px] font-mono text-white/35 mt-2">Display only — settle payment outside the app.</div>
         </div>
 
+        {/* Schedule — timer or datetime toggle */}
         <div className="lg:col-span-2">
-          <Label icon={<Calendar className="w-3.5 h-3.5" />} text="Scheduled Time (UTC)" />
-          <Input
-            value={scheduledAt}
-            onChange={(e) => setScheduledAt(e.target.value)}
-            type="datetime-local"
-            className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm"
-            data-testid="dev-admin-time"
-          />
-          <div className="text-[11px] font-mono text-white/35 mt-2">
-            Treated as UTC. The spin auto-fires at exactly this moment.
+          <div className="flex items-center justify-between mb-2">
+            <Label icon={<Calendar className="w-3.5 h-3.5" />} text="Schedule" />
+            <div className="flex rounded-sm overflow-hidden border border-white/10">
+              {[["timer", <Timer className="w-3 h-3 mr-1" />, "Countdown"], ["datetime", <Calendar className="w-3 h-3 mr-1" />, "Date & Time"]].map(([mode, icon, label]) => (
+                <button
+                  key={mode}
+                  onClick={() => setSchedMode(mode)}
+                  className={`flex items-center px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest transition-colors ${schedMode === mode ? "text-obsidian-950 font-bold" : "text-white/40 hover:text-white/70"}`}
+                  style={{ backgroundColor: schedMode === mode ? ACCENT : "transparent" }}
+                >
+                  {icon}{label}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {schedMode === "timer" ? (
+            <div>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <div className="text-[10px] font-mono text-white/40 mb-1">HOURS</div>
+                  <Input
+                    value={timerHours}
+                    onChange={(e) => setTimerHours(e.target.value.replace(/\D/g, ""))}
+                    type="number" min="0" max="72" placeholder="1"
+                    className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm text-center text-lg"
+                    data-testid="dev-admin-timer-hours"
+                  />
+                </div>
+                <span className="text-2xl text-white/30 mt-4">:</span>
+                <div className="flex-1">
+                  <div className="text-[10px] font-mono text-white/40 mb-1">MINUTES</div>
+                  <Input
+                    value={timerMinutes}
+                    onChange={(e) => setTimerMinutes(e.target.value.replace(/\D/g, ""))}
+                    type="number" min="0" max="59" placeholder="0"
+                    className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm text-center text-lg"
+                    data-testid="dev-admin-timer-minutes"
+                  />
+                </div>
+              </div>
+              <div className="text-[11px] font-mono text-white/35 mt-2">
+                {timerPreview ? <>Spins at: <span style={{ color: ACCENT }}>{timerPreview}</span></> : "Enter a duration above 30 seconds"}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <Input
+                value={scheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                type="datetime-local"
+                className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm"
+                data-testid="dev-admin-time"
+              />
+              <div className="text-[11px] font-mono text-white/35 mt-2">Treated as UTC. Spin auto-fires at this exact moment.</div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -356,32 +430,141 @@ function Label({ icon, text }) {
   );
 }
 
-function CurrentRoll({ roll, onCancel }) {
+function CurrentRoll({ roll, onCancel, onRefresh }) {
+  const [editing, setEditing] = useState(false);
+  const [addWallets, setAddWallets] = useState("");
+  const [editPot, setEditPot] = useState("");
+  const [saving, setSaving] = useState(false);
+
   if (!roll) return null;
-  const cancellable = roll.phase === "scheduled";
+  const editable = roll.phase === "scheduled";
+
+  const handleEdit = () => {
+    setEditPot(roll.pot_sol?.toString() || "");
+    setAddWallets("");
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    const payload = {};
+    const newWallets = addWallets.split(/[\s,;\n]+/).map((w) => w.trim()).filter(Boolean);
+    if (newWallets.length > 0) payload.wallets_to_add = newWallets;
+    const potNum = Number(editPot);
+    if (editPot && Number.isFinite(potNum) && potNum !== roll.pot_sol) payload.pot_sol = potNum;
+    if (!payload.wallets_to_add && payload.pot_sol === undefined) {
+      setEditing(false); return;
+    }
+    setSaving(true);
+    try {
+      await api.patch(`/dev/roll/${roll.id}`, payload);
+      toast.success("Roll updated");
+      setEditing(false);
+      await onRefresh();
+    } catch (err) {
+      toast.error("Update failed", { description: err?.response?.data?.detail || err?.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const newWalletsPreview = addWallets.split(/[\s,;\n]+/).map((w) => w.trim()).filter(Boolean);
+  const validNew = newWalletsPreview.filter((w) => isValidSolanaAddress(w)).length;
+  const invalidNew = newWalletsPreview.length - validNew;
+
   return (
     <div className="bg-obsidian-900/40 border border-white/5 rounded-sm mb-10" data-testid="dev-admin-current">
       <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-[0.3em] font-mono" style={{ color: ACCENT }}>
-          Active Roll · {roll.phase}
+          Active Roll · {roll.phase}{roll.title ? ` · ${roll.title}` : ""}
         </div>
-        {cancellable && (
-          <Button
-            onClick={() => onCancel(roll.id)}
-            variant="outline"
-            className="border-white/15 hover:border-crimson/40 text-white h-8 px-3 font-mono text-[11px] uppercase tracking-widest rounded-sm"
-            data-testid="dev-admin-cancel"
-          >
-            <Trash2 className="w-3 h-3 mr-1.5" /> Cancel
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {editable && !editing && (
+            <Button
+              onClick={handleEdit}
+              variant="outline"
+              className="border-white/15 hover:border-white/30 text-white h-8 px-3 font-mono text-[11px] uppercase tracking-widest rounded-sm"
+              data-testid="dev-admin-edit"
+            >
+              <PlusCircle className="w-3 h-3 mr-1.5" /> Edit
+            </Button>
+          )}
+          {editable && (
+            <Button
+              onClick={() => onCancel(roll.id)}
+              variant="outline"
+              className="border-white/15 hover:border-crimson/40 text-white h-8 px-3 font-mono text-[11px] uppercase tracking-widest rounded-sm"
+              data-testid="dev-admin-cancel"
+            >
+              <Trash2 className="w-3 h-3 mr-1.5" /> Cancel
+            </Button>
+          )}
+        </div>
       </div>
+
       <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
         <Stat label="Pot" value={fmtSol(roll.pot_sol)} />
         <Stat label="Wallets" value={roll.wallets?.length ?? 0} />
         <Stat label="Scheduled" value={new Date(roll.scheduled_at).toUTCString()} />
         {roll.winner && <Stat label="Winner" value={truncWallet(roll.winner)} accent />}
       </div>
+
+      {editing && (
+        <div className="border-t border-white/5 px-6 py-6" data-testid="dev-admin-edit-panel">
+          <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-4" style={{ color: ACCENT }}>
+            Edit Scheduled Roll
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2">
+              <Label icon={<PlusCircle className="w-3.5 h-3.5" />} text="Add Wallets (appended to pool)" />
+              <textarea
+                value={addWallets}
+                onChange={(e) => setAddWallets(e.target.value)}
+                rows={4}
+                placeholder={"Paste new wallet addresses to add\n(existing wallets are kept)"}
+                className="w-full bg-obsidian-950/80 border border-white/10 text-white placeholder:text-white/25 font-mono text-sm rounded-sm p-3 focus:outline-none focus:border-white/30"
+                data-testid="dev-admin-add-wallets"
+              />
+              {newWalletsPreview.length > 0 && (
+                <div className="mt-1.5 flex items-center gap-3 text-[11px] font-mono uppercase tracking-widest text-white/45">
+                  <span style={{ color: validNew ? ACCENT : undefined }}>+{validNew} valid</span>
+                  {invalidNew > 0 && <span className="text-crimson">· {invalidNew} invalid</span>}
+                  <span className="text-white/30">· new total: {(roll.wallets?.length ?? 0) + validNew}</span>
+                </div>
+              )}
+            </div>
+            <div>
+              <Label icon={<Coins className="w-3.5 h-3.5" />} text="Update Pot (SOL)" />
+              <Input
+                value={editPot}
+                onChange={(e) => setEditPot(e.target.value)}
+                type="number" min="0" step="0.01"
+                className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm"
+                data-testid="dev-admin-edit-pot"
+              />
+              <div className="text-[11px] font-mono text-white/35 mt-2">Leave unchanged to keep current.</div>
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-end gap-3">
+            <Button
+              onClick={() => setEditing(false)}
+              variant="ghost"
+              className="text-white/50 hover:text-white h-9 px-4 font-mono text-[11px] uppercase tracking-widest rounded-sm"
+            >
+              <X className="w-3 h-3 mr-1.5" /> Discard
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="font-bold uppercase tracking-widest text-xs rounded-sm h-9 px-5"
+              style={{ backgroundColor: ACCENT, color: "#0A0D0B" }}
+              data-testid="dev-admin-save"
+            >
+              <Save className="w-3.5 h-3.5 mr-1.5" />
+              {saving ? "Saving…" : "Save Changes"}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
