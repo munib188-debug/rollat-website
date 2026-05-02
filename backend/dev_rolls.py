@@ -31,6 +31,7 @@ from telegram_bot import (
     announce_dev_roll_scheduled,
     announce_dev_roll_spinning,
     announce_dev_roll_winner,
+    announce_dev_roll_reminder,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class DevRoll(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: Optional[str] = None           # e.g. "Community Giveaway #3"
+    ten_min_warned: bool = False          # True once the 10-min reminder is sent
     wallets: List[str]
     pot_sol: float
     scheduled_at: datetime
@@ -272,8 +274,26 @@ async def _resolve_one_roll(col, roll: dict) -> None:
 
 async def run_due_rolls(col) -> int:
     """Find every scheduled roll whose time has arrived and resolve it.
+    Also sends a 10-minute reminder for upcoming rolls.
     Returns the number of rolls fired this tick (typically 0 or 1)."""
     now = datetime.now(timezone.utc)
+
+    # 10-minute reminder: scheduled_at between 9m30s and 10m30s away, not yet warned.
+    reminder_lo = now + timedelta(seconds=570)
+    reminder_hi = now + timedelta(seconds=630)
+    unwarneds = col.find({
+        "phase": "scheduled",
+        "ten_min_warned": False,
+        "scheduled_at": {"$gte": reminder_lo, "$lte": reminder_hi},
+    }).limit(5)
+    for roll in await unwarneds.to_list(5):
+        await col.update_one({"id": roll["id"]}, {"$set": {"ten_min_warned": True}})
+        asyncio.create_task(announce_dev_roll_reminder(
+            title=roll.get("title"),
+            pot_sol=roll["pot_sol"],
+            wallet_count=len(roll.get("wallets", [])),
+        ))
+
     cur = col.find({"phase": "scheduled", "scheduled_at": {"$lte": now}}).limit(5)
     due = await cur.to_list(5)
     if not due:

@@ -35,6 +35,8 @@ from dev_rolls import (
 from telegram_bot import (
     announce_daily_spin_started,
     announce_daily_spin_winner,
+    announce_daily_spin_reminder,
+    announce_rollover,
 )
 from onchain import (
     fetch_token_market_data,
@@ -304,8 +306,37 @@ def generate_mock_qualified_wallets(count: int = 347) -> List[dict]:
     return wallets
 
 
+POT_THRESHOLD_SOL = 5.0  # minimum pot required to run a real spin
+
 nonce_store: Optional[NonceStore] = None
 snapshot_store: Optional[SnapshotStore] = None
+
+
+async def daily_reminder_loop() -> None:
+    """Background task: sends a 10-minute heads-up before the 00:00 UTC daily spin.
+    Tracks the last warned spin datetime so it fires exactly once per day."""
+    warned_for: Optional[datetime] = None
+    logger.info("[daily_reminder] loop started")
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            next_spin = _next_daily_spin(now)
+            seconds_left = (next_spin - now).total_seconds()
+            # Fire when 9m30s–10m30s remain and we haven't warned for this spin yet.
+            if 570 <= seconds_left <= 630 and warned_for != next_spin:
+                pot = await fetch_pot_balance()
+                pot_sol = round(float(pot or 0), 4)
+                asyncio.create_task(announce_daily_spin_reminder(
+                    pot_sol=pot_sol,
+                    next_spin_at_iso=next_spin.isoformat(),
+                ))
+                warned_for = next_spin
+                logger.info(f"[daily_reminder] 10-min warning sent for {next_spin.isoformat()}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[daily_reminder] tick failed")
+        await asyncio.sleep(30)
 
 
 @api_router.on_event("startup")
@@ -392,6 +423,8 @@ async def on_startup():
 
     # Background task: scan for due dev rolls every few seconds and run them.
     asyncio.create_task(dev_scheduler_loop(_get_col))
+    # Background task: 10-min daily spin reminder.
+    asyncio.create_task(daily_reminder_loop())
 
 
 # ---------- Routes ----------
@@ -488,6 +521,7 @@ async def get_stats():
     spin_doc = await _get_col("spin_state").find_one({"_id": "singleton"})
     spin_phase = spin_doc.get("phase", "idle") if spin_doc else "idle"
     last_winner = spin_doc.get("winner") if spin_doc else None
+    rollover_count = spin_doc.get("rollover_count", 0) if spin_doc else 0
 
     # Pull live on-chain numbers + snapshot history in parallel. All inputs
     # are cached or indexed so /stats stays fast under polling.
@@ -508,8 +542,8 @@ async def get_stats():
         total_distributed_sol=round(total_distributed, 2),
         biggest_win_sol=round(biggest, 2),
         spins_completed=spins,
-        rollover_active=False,
-        rollover_count=0,
+        rollover_active=rollover_count > 0,
+        rollover_count=rollover_count,
         pot_threshold_sol=5.0,
         token_price_usd=float(market.get("price_usd") or 0),
         market_cap_usd=float(market.get("market_cap_usd") or 0),
@@ -619,6 +653,29 @@ async def trigger_spin(admin: str = Depends(get_admin_wallet)):
     doc = await _get_col("spin_state").find_one({"_id": "singleton"})
     if doc and doc.get("phase") == "spinning":
         raise HTTPException(status_code=409, detail="Spin already in progress")
+
+    # Rollover check: if pot hasn't hit the threshold, skip the spin and announce.
+    pot_check = await fetch_pot_balance()
+    pot_check_sol = round(float(pot_check or 0), 4)
+    if pot_check_sol < POT_THRESHOLD_SOL:
+        rollover_count = (doc.get("rollover_count", 0) + 1) if doc else 1
+        await _get_col("spin_state").update_one(
+            {"_id": "singleton"},
+            {"$set": {"rollover_count": rollover_count}},
+            upsert=True,
+        )
+        asyncio.create_task(announce_rollover(
+            pot_sol=pot_check_sol,
+            threshold_sol=POT_THRESHOLD_SOL,
+            rollover_count=rollover_count,
+        ))
+        logger.info(f"[spin] rollover #{rollover_count} — pot {pot_check_sol} SOL < threshold {POT_THRESHOLD_SOL} SOL")
+        return {
+            "status": "rollover",
+            "pot_sol": pot_check_sol,
+            "threshold_sol": POT_THRESHOLD_SOL,
+            "rollover_count": rollover_count,
+        }
 
     recent_snaps = await fetch_recent_snapshots(_get_col("holder_snapshots"))
     if has_sufficient_history(recent_snaps):

@@ -99,6 +99,49 @@ async def announce_dev_roll_winner(
     )
 
 
+# ── Reminder / rollover announcements ──────────────────────────────────────
+
+async def announce_dev_roll_reminder(
+    title: str | None,
+    pot_sol: float,
+    wallet_count: int,
+    minutes_left: int = 10,
+) -> None:
+    label = title or "Dev Roll"
+    await _send(
+        f"⏰ *{label} — {minutes_left} minutes to go\\!*\n"
+        f"💰 Pot: `{pot_sol} SOL` · {wallet_count} wallets\n\n"
+        f"Watch live → {SITE}/#dev-roll"
+    )
+
+
+async def announce_daily_spin_reminder(
+    pot_sol: float,
+    next_spin_at_iso: str,
+) -> None:
+    time_str = next_spin_at_iso[:16].replace("T", " ") + " UTC" if next_spin_at_iso else "00:00 UTC"
+    await _send(
+        f"⏰ *Daily Spin — 10 minutes to go\\!*\n"
+        f"💰 Current pot: `{pot_sol} SOL`\n"
+        f"🕐 Spins at: `{time_str}`\n\n"
+        f"Watch live → {SITE}/#roulette-arena"
+    )
+
+
+async def announce_rollover(
+    pot_sol: float,
+    threshold_sol: float,
+    rollover_count: int,
+) -> None:
+    await _send(
+        f"🔄 *Pot Rolled Over — Round Skipped*\n"
+        f"💰 Current pot: `{pot_sol} SOL` \\(threshold: `{threshold_sol} SOL`\\)\n"
+        f"📈 Pot carries forward to the next round\n"
+        f"🔢 Rollover streak: {rollover_count}\n\n"
+        f"{SITE}"
+    )
+
+
 # ── Daily 24h spin announcements ────────────────────────────────────────────
 
 async def announce_daily_spin_started(
