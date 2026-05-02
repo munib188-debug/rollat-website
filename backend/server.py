@@ -307,7 +307,7 @@ def generate_mock_qualified_wallets(count: int = 347) -> List[dict]:
     return wallets
 
 
-POT_THRESHOLD_SOL = 5.0  # minimum pot required to run a real spin
+POT_THRESHOLD_SOL = 1.0  # minimum pot required to run a real spin
 
 nonce_store: Optional[NonceStore] = None
 snapshot_store: Optional[SnapshotStore] = None
@@ -545,7 +545,7 @@ async def get_stats():
         spins_completed=spins,
         rollover_active=rollover_count > 0,
         rollover_count=rollover_count,
-        pot_threshold_sol=5.0,
+        pot_threshold_sol=POT_THRESHOLD_SOL,
         token_price_usd=float(market.get("price_usd") or 0),
         market_cap_usd=float(market.get("market_cap_usd") or 0),
         holders=int(holders or 0),
