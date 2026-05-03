@@ -19,7 +19,7 @@ const truncWallet = (w) =>
   w ? `${w.slice(0, 6)}...${w.slice(-4)}` : "—";
 
 const fmtSol = (n) =>
-  `${(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} SOL`;
+  `${(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SOL`;
 
 export default function RouletteArena() {
   const { spinState, stats } = useSpinPhase() || {};
@@ -318,7 +318,7 @@ function PotMeter({ current, threshold }) {
         />
       </div>
       <div className="flex items-center justify-between mt-2 font-mono text-xs text-white/35">
-        <span>{current?.toLocaleString("en-US", { maximumFractionDigits: 1 })} SOL current</span>
+        <span>{current?.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SOL current</span>
         <span>{threshold} SOL min</span>
       </div>
     </div>
