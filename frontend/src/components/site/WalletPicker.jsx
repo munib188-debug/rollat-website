@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { X, ExternalLink, AlertCircle } from "lucide-react";
@@ -10,10 +10,11 @@ const INSTALL_LINKS = [
 ];
 
 export default function WalletPicker({ open, onClose }) {
-  const { wallets, wallet, select, connect, connected, connecting: providerConnecting } = useWallet();
+  const { wallets, wallet, select, connect, connected } = useWallet();
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(null); // wallet name being connected
   const [pendingName, setPendingName] = useState(null); // wallet we asked the provider to select
+  const startedRef = useRef(false); // guards against the effect re-firing connect() mid-flight
 
   // Lock body scroll while open
   useEffect(() => {
@@ -33,29 +34,39 @@ export default function WalletPicker({ open, onClose }) {
 
   // Reset state when re-opened
   useEffect(() => {
-    if (open) { setError(null); setConnecting(null); setPendingName(null); }
+    if (open) {
+      setError(null); setConnecting(null); setPendingName(null);
+      startedRef.current = false;
+    }
   }, [open]);
+
+  // Auto-close when a connection lands (handles both fresh connects and
+  // autoConnect from a prior session).
+  useEffect(() => {
+    if (open && connected) {
+      setPendingName(null);
+      setConnecting(null);
+      startedRef.current = false;
+      onClose();
+    }
+  }, [open, connected, onClose]);
 
   // After the user picks a wallet, the provider's `select()` is async — the
   // `wallet` ref doesn't update until the next render. We wait for that to
-  // happen before calling `connect()`, otherwise the first click reads a
-  // stale (null) wallet and silently no-ops or errors.
+  // happen before calling `connect()`. Use a ref-based guard so re-renders
+  // (e.g. when the provider flips its `connecting` flag) don't double-fire.
   useEffect(() => {
     if (!pendingName) return;
+    if (startedRef.current) return;
     if (!wallet || wallet.adapter.name !== pendingName) return;
-    if (connected || providerConnecting) return;
+    if (connected) return;
 
-    let cancelled = false;
+    startedRef.current = true;
     (async () => {
       try {
         await connect();
-        if (!cancelled) {
-          setPendingName(null);
-          setConnecting(null);
-          onClose();
-        }
+        // success path is handled by the `connected` effect above
       } catch (err) {
-        if (cancelled) return;
         // eslint-disable-next-line no-console
         console.error("[wallet] connect failed:", err);
         const msg = (err?.message || "").toLowerCase();
@@ -63,17 +74,17 @@ export default function WalletPicker({ open, onClose }) {
           setError("Connection cancelled. Unlock your wallet and try again.");
         } else if (msg.includes("popup")) {
           setError("Popup was blocked. Allow popups for this site and try again.");
-        } else if (msg.includes("locked") || msg.includes("not connected") || msg.includes("not found")) {
+        } else if (msg.includes("locked") || msg.includes("not connected") || msg.includes("not found") || msg.includes("ready")) {
           setError("Your wallet appears to be locked. Unlock it, then click Connect again.");
         } else {
           setError("Connection failed. Make sure your wallet is unlocked and try again.");
         }
         setPendingName(null);
         setConnecting(null);
+        startedRef.current = false;
       }
     })();
-    return () => { cancelled = true; };
-  }, [pendingName, wallet, connected, providerConnecting, connect, onClose]);
+  }, [pendingName, wallet, connected, connect]);
 
   if (!open) return null;
 
