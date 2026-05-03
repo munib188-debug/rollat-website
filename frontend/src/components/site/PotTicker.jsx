@@ -3,7 +3,7 @@ import { useSpinPhase } from "@/lib/SpinPhaseContext";
 import { TrendingUp, Coins, Users, Trophy, Radio } from "lucide-react";
 
 const fmtSol = (n) =>
-  `${(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SOL`;
+  `${(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 1 })} SOL`;
 
 export default function PotTicker() {
   const { stats, spinState } = useSpinPhase() || {};
