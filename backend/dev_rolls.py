@@ -289,17 +289,24 @@ async def _resolve_one_roll(col, roll: dict) -> None:
     roll_id = roll["id"]
     now = datetime.now(timezone.utc)
 
-    # Race-safe: only flip the phase if it's still 'scheduled'. Motor's
-    # update_one returns a result with matched_count we could check, but the
-    # in-memory fallback collection used in dev doesn't support that — so we
-    # re-read the doc instead. The scheduler runs single-instance anyway.
-    await col.update_one(
-        {"id": roll_id, "phase": "scheduled"},
-        {"$set": {"phase": "spinning", "spin_started_at": now}},
-    )
+    # Race-safe atomic transition: only one worker wins the flip from
+    # 'scheduled' -> 'spinning'. Critical when Render scales to >1 instance —
+    # without this, two workers could both fire winner announcements.
+    try:
+        result = await col.update_one(
+            {"id": roll_id, "phase": "scheduled"},
+            {"$set": {"phase": "spinning", "spin_started_at": now}},
+        )
+        matched = getattr(result, "matched_count", None)
+        if matched == 0:
+            # Lost the race — another worker grabbed this roll.
+            return
+    except Exception:
+        logger.exception(f"[dev_roll] phase flip failed for {roll_id}")
+        return
+
     refreshed = await col.find_one({"id": roll_id})
     if not refreshed or refreshed.get("phase") != "spinning":
-        # Something else moved it (cancelled? already running?). Skip.
         return
 
     logger.info(f"[dev_roll] spinning roll {roll_id} ({len(refreshed['wallets'])} wallets, pot={refreshed['pot_sol']})")

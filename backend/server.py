@@ -347,7 +347,7 @@ async def daily_reminder_loop() -> None:
         await asyncio.sleep(30)
 
 
-@api_router.on_event("startup")
+@app.on_event("startup")
 async def on_startup():
     global USE_MONGO, nonce_store, snapshot_store
 
@@ -362,13 +362,24 @@ async def on_startup():
     else:
         logger.warning("No ADMIN_WALLETS configured — admin endpoints are locked")
 
+    # Production safety: refuse to boot in prod if MONGO_URL is missing or
+    # falls back to localhost — silent in-memory mode in prod = lost winners.
+    is_prod = os.environ.get("RENDER") or os.environ.get("ENV") == "production"
+    raw_mongo = os.environ.get("MONGO_URL", "")
+    if is_prod and (not raw_mongo or "localhost" in raw_mongo or "127.0.0.1" in raw_mongo):
+        logger.error("FATAL: MONGO_URL missing or pointing at localhost in production")
+        raise RuntimeError("MONGO_URL not configured for production")
+
     try:
         await db.command("ping")
         USE_MONGO = True
         logger.info("MongoDB connected")
     except Exception:
+        if is_prod:
+            logger.error("FATAL: MongoDB ping failed in production — refusing to start with in-memory store")
+            raise
         USE_MONGO = False
-        logger.info("MongoDB unavailable — using in-memory store")
+        logger.info("MongoDB unavailable — using in-memory store (dev only)")
 
     nonce_store = NonceStore(_get_col("auth_nonces"))
     await nonce_store.ensure_indexes()
