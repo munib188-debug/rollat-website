@@ -593,9 +593,7 @@ def _is_valid_solana_address(addr: str) -> bool:
         return False
 
 
-@api_router.get("/wallet-check/{wallet}", response_model=WalletStatus)
-@limiter.limit("30/minute")
-async def wallet_check(request: Request, wallet: str):
+async def _wallet_check_core(wallet: str) -> "WalletStatus":
     if not wallet or not _is_valid_solana_address(wallet):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
 
@@ -629,10 +627,16 @@ async def wallet_check(request: Request, wallet: str):
     )
 
 
+@api_router.get("/wallet-check/{wallet}", response_model=WalletStatus)
+@limiter.limit("30/minute")
+async def wallet_check(request: Request, wallet: str):
+    return await _wallet_check_core(wallet)
+
+
 @api_router.get("/dashboard/{wallet}")
 @limiter.limit("30/minute")
 async def dashboard(request: Request, wallet: str):
-    status = await wallet_check(wallet)
+    status = await _wallet_check_core(wallet)
     history = await _get_col("winners").find(
         {"wallet": wallet}, {"_id": 0}
     ).sort("round_number", -1).to_list(20)
