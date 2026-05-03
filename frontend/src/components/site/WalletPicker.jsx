@@ -10,9 +10,10 @@ const INSTALL_LINKS = [
 ];
 
 export default function WalletPicker({ open, onClose }) {
-  const { wallets, select } = useWallet();
+  const { wallets, wallet, select, connect, connected, connecting: providerConnecting } = useWallet();
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(null); // wallet name being connected
+  const [pendingName, setPendingName] = useState(null); // wallet we asked the provider to select
 
   // Lock body scroll while open
   useEffect(() => {
@@ -32,8 +33,47 @@ export default function WalletPicker({ open, onClose }) {
 
   // Reset state when re-opened
   useEffect(() => {
-    if (open) { setError(null); setConnecting(null); }
+    if (open) { setError(null); setConnecting(null); setPendingName(null); }
   }, [open]);
+
+  // After the user picks a wallet, the provider's `select()` is async — the
+  // `wallet` ref doesn't update until the next render. We wait for that to
+  // happen before calling `connect()`, otherwise the first click reads a
+  // stale (null) wallet and silently no-ops or errors.
+  useEffect(() => {
+    if (!pendingName) return;
+    if (!wallet || wallet.adapter.name !== pendingName) return;
+    if (connected || providerConnecting) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await connect();
+        if (!cancelled) {
+          setPendingName(null);
+          setConnecting(null);
+          onClose();
+        }
+      } catch (err) {
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.error("[wallet] connect failed:", err);
+        const msg = (err?.message || "").toLowerCase();
+        if (msg.includes("user rejected") || msg.includes("cancelled") || msg.includes("rejected")) {
+          setError("Connection cancelled. Unlock your wallet and try again.");
+        } else if (msg.includes("popup")) {
+          setError("Popup was blocked. Allow popups for this site and try again.");
+        } else if (msg.includes("locked") || msg.includes("not connected") || msg.includes("not found")) {
+          setError("Your wallet appears to be locked. Unlock it, then click Connect again.");
+        } else {
+          setError("Connection failed. Make sure your wallet is unlocked and try again.");
+        }
+        setPendingName(null);
+        setConnecting(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [pendingName, wallet, connected, providerConnecting, connect, onClose]);
 
   if (!open) return null;
 
@@ -41,37 +81,13 @@ export default function WalletPicker({ open, onClose }) {
     (w) => w.readyState === "Installed" || w.readyState === "Loadable"
   );
 
-  const pick = async (walletName) => {
+  const pick = (walletName) => {
     setError(null);
     setConnecting(walletName);
-    try {
-      // Find the adapter and connect to it directly. Using the provider's
-      // connect() after select() races on the first click because select()
-      // is a state update that hasn't flushed by the time connect() reads it.
-      // Calling adapter.connect() directly bypasses the stale closure issue,
-      // and select() still runs so the provider syncs its internal state for
-      // future renders / autoConnect.
-      const target = wallets.find((w) => w.adapter.name === walletName);
-      if (!target) throw new Error("wallet not found");
-      select(walletName);
-      if (!target.adapter.connected) {
-        await target.adapter.connect();
-      }
-      onClose();
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("[wallet] connect failed:", err);
-      const msg = err?.message || "";
-      if (msg.toLowerCase().includes("user rejected") || msg.toLowerCase().includes("cancelled")) {
-        setError("Connection cancelled. Unlock your wallet and try again.");
-      } else if (msg.toLowerCase().includes("popup")) {
-        setError("Popup was blocked. Allow popups for this site and try again.");
-      } else {
-        setError("Connection failed. Make sure your wallet is unlocked and try again.");
-      }
-    } finally {
-      setConnecting(null);
-    }
+    setPendingName(walletName);
+    select(walletName);
+    // The actual connect() runs in the useEffect above once the provider
+    // has flushed the selection. This avoids the first-click race condition.
   };
 
   const overlay = (
