@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Gift, Sparkles, Trophy, Clock, ExternalLink, Copy } from "lucide-react";
+import { Gift, Sparkles, Trophy, Clock, ExternalLink, Copy, Twitter } from "lucide-react";
 import { useDevRoll } from "@/lib/useDevRoll";
 import { useCountdown, pad } from "@/lib/useCountdown";
 import { SectionLabel } from "./HowItWorks";
@@ -333,7 +333,7 @@ function ResolvedView({ roll }) {
           >
             {winner}
           </div>
-          <div className="mt-3 flex items-center gap-3">
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
             <button
               onClick={() => navigator.clipboard?.writeText(winner || "")}
               className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] font-mono text-white/45 hover:text-white"
@@ -347,6 +347,18 @@ function ResolvedView({ roll }) {
               className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] font-mono text-white/45 hover:text-white"
             >
               <ExternalLink className="w-3 h-3" /> solscan
+            </a>
+            <a
+              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
+                `🏆 Just watched a $ROLLAT Dev Roll land on a winner — ${fmtSol(roll.pot_sol)} sent to one wallet.\n\nHold $ROLLAT, get auto-entered.\n\nrollat.vercel.app`
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-[10px] uppercase tracking-[0.2em] font-mono"
+              style={{ borderColor: `${ACCENT}55`, color: ACCENT }}
+              data-testid="share-on-x"
+            >
+              <Twitter className="w-3 h-3" /> share on X
             </a>
           </div>
         </div>

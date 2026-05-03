@@ -1,10 +1,11 @@
 import "@/index.css";
-import { Component } from "react";
+import { Component, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Landing from "@/pages/Landing";
-import Dashboard from "@/pages/Dashboard";
-import DevAdmin from "@/pages/DevAdmin";
 import { Toaster } from "@/components/ui/sonner";
+
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const DevAdmin = lazy(() => import("@/pages/DevAdmin"));
 import { SpinPhaseProvider } from "@/lib/SpinPhaseContext";
 import SolanaWalletProvider from "@/lib/SolanaWalletProvider";
 import { AuthProvider } from "@/lib/AuthContext";
@@ -42,11 +43,13 @@ function App() {
           <SpinPhaseProvider>
             <div className="App font-sans bg-obsidian-950 text-white min-h-screen">
               <BrowserRouter>
-                <Routes>
-                  <Route path="/" element={<Landing />} />
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/dev" element={<DevAdmin />} />
-                </Routes>
+                <Suspense fallback={<div className="min-h-screen bg-obsidian-950" />}>
+                  <Routes>
+                    <Route path="/" element={<Landing />} />
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/dev" element={<DevAdmin />} />
+                  </Routes>
+                </Suspense>
               </BrowserRouter>
               <Toaster richColors position="top-center" />
             </div>

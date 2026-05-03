@@ -2462,7 +2462,7 @@
     "@wallet-standard/core" "^1.1.1"
     js-base64 "^3.7.5"
 
-"@solana-mobile/wallet-adapter-mobile@^2.2.0":
+"@solana-mobile/wallet-adapter-mobile@^2.2.0", "@solana-mobile/wallet-adapter-mobile@^2.2.8":
   version "2.2.8"
   resolved "https://registry.yarnpkg.com/@solana-mobile/wallet-adapter-mobile/-/wallet-adapter-mobile-2.2.8.tgz#747fc43bd90072d76a5a5912f83d211988f6598e"
   integrity sha512-ZbXY3/0+UnnyS0hvArpO1b1pYzaQAiVIp+HBUm11aLEkE5+ISvHTRPr/bCEUXZfPkez/1n9zH3H0leK25Lj6Nw==

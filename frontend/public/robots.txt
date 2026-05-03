@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /dev
+Disallow: /dashboard
+
+Sitemap: https://rollat.vercel.app/sitemap.xml

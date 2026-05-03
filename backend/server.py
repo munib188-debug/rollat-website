@@ -1,6 +1,9 @@
-from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -161,6 +164,9 @@ def _get_col(name: str):
     return _MemCollection(name)
 
 app = FastAPI(title="$ROLLAT API")
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 api_router = APIRouter(prefix="/api")
 
 
@@ -437,7 +443,8 @@ async def root():
 
 # ---------- Sign-in-with-Solana ----------
 @api_router.get("/auth/nonce", response_model=NonceResponse)
-async def auth_nonce(address: str):
+@limiter.limit("10/minute")
+async def auth_nonce(request: Request, address: str):
     """Issue a one-time nonce + SIWS message for the given wallet address."""
     if nonce_store is None:
         raise HTTPException(status_code=503, detail="auth not initialized")
@@ -445,7 +452,8 @@ async def auth_nonce(address: str):
 
 
 @api_router.post("/auth/verify", response_model=VerifyResponse)
-async def auth_verify(req: VerifyRequest):
+@limiter.limit("10/minute")
+async def auth_verify(request: Request, req: VerifyRequest):
     """Verify a signed SIWS message and return a short-lived JWT."""
     if nonce_store is None:
         raise HTTPException(status_code=503, detail="auth not initialized")
@@ -575,7 +583,8 @@ def _is_valid_solana_address(addr: str) -> bool:
 
 
 @api_router.get("/wallet-check/{wallet}", response_model=WalletStatus)
-async def wallet_check(wallet: str):
+@limiter.limit("30/minute")
+async def wallet_check(request: Request, wallet: str):
     if not wallet or not _is_valid_solana_address(wallet):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
 
@@ -610,7 +619,8 @@ async def wallet_check(wallet: str):
 
 
 @api_router.get("/dashboard/{wallet}")
-async def dashboard(wallet: str):
+@limiter.limit("30/minute")
+async def dashboard(request: Request, wallet: str):
     status = await wallet_check(wallet)
     history = await _get_col("winners").find(
         {"wallet": wallet}, {"_id": 0}
