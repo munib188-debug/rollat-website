@@ -10,7 +10,7 @@ const INSTALL_LINKS = [
 ];
 
 export default function WalletPicker({ open, onClose }) {
-  const { wallets, select, connect } = useWallet();
+  const { wallets, select } = useWallet();
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(null); // wallet name being connected
 
@@ -45,9 +45,18 @@ export default function WalletPicker({ open, onClose }) {
     setError(null);
     setConnecting(walletName);
     try {
+      // Find the adapter and connect to it directly. Using the provider's
+      // connect() after select() races on the first click because select()
+      // is a state update that hasn't flushed by the time connect() reads it.
+      // Calling adapter.connect() directly bypasses the stale closure issue,
+      // and select() still runs so the provider syncs its internal state for
+      // future renders / autoConnect.
+      const target = wallets.find((w) => w.adapter.name === walletName);
+      if (!target) throw new Error("wallet not found");
       select(walletName);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await connect();
+      if (!target.adapter.connected) {
+        await target.adapter.connect();
+      }
       onClose();
     } catch (err) {
       // eslint-disable-next-line no-console
