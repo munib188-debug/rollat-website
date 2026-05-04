@@ -192,6 +192,7 @@ class Stats(BaseModel):
     rollover_active: bool
     rollover_count: int
     pot_threshold_sol: float
+    fixed_prize_sol: Optional[float] = None
     token_price_usd: float
     market_cap_usd: float
     holders: int
@@ -315,6 +316,11 @@ def generate_mock_qualified_wallets(count: int = 347) -> List[dict]:
 
 
 POT_THRESHOLD_SOL = 1.0  # minimum pot required to run a real spin
+
+# When set, the daily spin pays this fixed SOL amount and skips the threshold
+# gate entirely. Set to None to restore the original "winner takes the whole
+# pot, gated by POT_THRESHOLD_SOL" behavior.
+FIXED_DAILY_PRIZE_SOL: Optional[float] = 0.1
 
 nonce_store: Optional[NonceStore] = None
 snapshot_store: Optional[SnapshotStore] = None
@@ -566,6 +572,7 @@ async def get_stats():
         rollover_active=rollover_count > 0,
         rollover_count=rollover_count,
         pot_threshold_sol=POT_THRESHOLD_SOL,
+        fixed_prize_sol=FIXED_DAILY_PRIZE_SOL,
         token_price_usd=float(market.get("price_usd") or 0),
         market_cap_usd=float(market.get("market_cap_usd") or 0),
         holders=int(holders or 0),
@@ -682,9 +689,11 @@ async def trigger_spin(admin: str = Depends(get_admin_wallet)):
         raise HTTPException(status_code=409, detail="Spin already in progress")
 
     # Rollover check: if pot hasn't hit the threshold, skip the spin and announce.
+    # In fixed-prize mode this gate is bypassed entirely — the spin always runs
+    # and the winner gets FIXED_DAILY_PRIZE_SOL regardless of pot balance.
     pot_check = await fetch_pot_balance()
     pot_check_sol = round(float(pot_check or 0), 4)
-    if pot_check_sol < POT_THRESHOLD_SOL:
+    if FIXED_DAILY_PRIZE_SOL is None and pot_check_sol < POT_THRESHOLD_SOL:
         rollover_count = (doc.get("rollover_count", 0) + 1) if doc else 1
         await _get_col("spin_state").update_one(
             {"_id": "singleton"},
@@ -734,10 +743,15 @@ async def trigger_spin(admin: str = Depends(get_admin_wallet)):
     })
 
     pot_sol_now = await fetch_pot_balance()
+    announced_prize = (
+        float(FIXED_DAILY_PRIZE_SOL)
+        if FIXED_DAILY_PRIZE_SOL is not None
+        else round(float(pot_sol_now or 0), 4)
+    )
     asyncio.create_task(announce_daily_spin_started(
         round_number=round_number,
         participants_count=len(participants),
-        pot_sol=round(float(pot_sol_now or 0), 4),
+        pot_sol=announced_prize,
     ))
 
     # Resolve after animation time (10s)
@@ -749,7 +763,10 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
     await asyncio.sleep(delay)
     winner_entry = select_weighted_winner(participants)
     pot_sol = await fetch_pot_balance()
-    amount_sol = round(float(pot_sol or 0), 4)
+    if FIXED_DAILY_PRIZE_SOL is not None:
+        amount_sol = float(FIXED_DAILY_PRIZE_SOL)
+    else:
+        amount_sol = round(float(pot_sol or 0), 4)
     now = datetime.now(timezone.utc)
 
     winner_data = {

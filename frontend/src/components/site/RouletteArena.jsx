@@ -55,8 +55,13 @@ export default function RouletteArena() {
           )}
         </AnimatePresence>
 
-        {/* Pot meter — always visible */}
-        <PotMeter current={stats?.current_pot_sol} threshold={stats?.pot_threshold_sol} />
+        {/* Fixed-prize mode: show "Tonight's Prize" card instead of threshold meter.
+            When stats.fixed_prize_sol is null we revert to the old threshold UI. */}
+        {stats?.fixed_prize_sol != null ? (
+          <TonightsPrize prize={stats.fixed_prize_sol} treasury={stats.current_pot_sol} />
+        ) : (
+          <PotMeter current={stats?.current_pot_sol} threshold={stats?.pot_threshold_sol} />
+        )}
       </div>
     </section>
   );
@@ -104,7 +109,14 @@ function IdleDisplay({ t, stats }) {
         <div className="flex flex-wrap gap-x-8 gap-y-2 font-mono text-sm text-white/50">
           <div><span className="text-white">{stats?.total_qualified_wallets ?? "—"}</span> wallets qualified</div>
           <div>Round <span className="text-white">#{stats?.spins_completed ? stats.spins_completed + 1 : "—"}</span></div>
-          <div>Pot <span className="text-gold">{stats?.current_pot_sol ? `${stats.current_pot_sol} SOL` : "—"}</span></div>
+          <div>
+            {stats?.fixed_prize_sol != null ? "Prize" : "Pot"}{" "}
+            <span className="text-gold">
+              {stats?.fixed_prize_sol != null
+                ? fmtSol(stats.fixed_prize_sol)
+                : (stats?.current_pot_sol ? `${stats.current_pot_sol} SOL` : "—")}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -293,6 +305,35 @@ function WinnerReveal({ winner, stats }) {
         </p>
       </div>
     </>
+  );
+}
+
+function TonightsPrize({ prize, treasury }) {
+  return (
+    <div className="mt-12 p-5 border border-gold/30 rounded-sm bg-obsidian-900/60 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-gold mb-2">
+          Tonight's Prize
+        </div>
+        <div className="font-mono font-black text-4xl sm:text-5xl tabular-nums gold-text">
+          {fmtSol(prize)}
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-widest text-white/40 mt-2">
+          Fixed daily payout · winner takes all
+        </div>
+      </div>
+      <div className="sm:text-right">
+        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-white/40 mb-2">
+          Treasury
+        </div>
+        <div className="font-mono font-bold text-2xl sm:text-3xl tabular-nums text-white/80">
+          {(treasury ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} SOL
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-widest text-white/30 mt-2">
+          On-chain · accumulating
+        </div>
+      </div>
+    </div>
   );
 }
 
