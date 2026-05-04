@@ -36,16 +36,57 @@ export default function GuestAdmin() {
   const [submitting, setSubmitting] = useState(false);
   const [current, setCurrent] = useState(null);
   const [history, setHistory] = useState([]);
+  const [applications, setApplications] = useState([]);
 
   const refresh = async () => {
-    const [cur, hist] = await Promise.all([
+    const [cur, hist, apps] = await Promise.all([
       api.get("/guest/roll/current").then((r) => r.data).catch(() => null),
       isAdmin
         ? api.get("/guest/rolls").then((r) => r.data).catch(() => [])
         : Promise.resolve([]),
+      isAdmin
+        ? api.get("/guest/applications").then((r) => r.data).catch(() => [])
+        : Promise.resolve([]),
     ]);
     setCurrent(cur);
     setHistory(Array.isArray(hist) ? hist : []);
+    setApplications(Array.isArray(apps) ? apps : []);
+  };
+
+  const loadApplication = (app) => {
+    // Push the application into the next empty entry slot.
+    setEntries((prev) => {
+      const idx = prev.findIndex((e) => !e.name && !e.ticker);
+      if (idx === -1) {
+        toast.error("All slots full — remove one first");
+        return prev;
+      }
+      return prev.map((e, i) => i === idx ? {
+        name: app.name || "",
+        ticker: app.ticker || "",
+        logo_url: app.logo_url || "",
+        link: app.community_link || "",
+      } : e);
+    });
+    toast.success(`Loaded $${app.ticker} into the form`);
+  };
+
+  const setApplicationStatus = async (appId, status) => {
+    try {
+      await api.patch(`/guest/applications/${appId}`, { status });
+      await refresh();
+    } catch (e) {
+      toast.error("Failed", { description: e?.response?.data?.detail || e?.message });
+    }
+  };
+
+  const deleteApplication = async (appId) => {
+    try {
+      await api.delete(`/guest/applications/${appId}`);
+      await refresh();
+    } catch (e) {
+      toast.error("Failed", { description: e?.response?.data?.detail || e?.message });
+    }
   };
 
   useEffect(() => {
@@ -329,6 +370,86 @@ export default function GuestAdmin() {
         >
           {submitting ? "Scheduling…" : "Schedule Guest Roll"}
         </Button>
+      </div>
+
+      {/* Applications inbox — public submissions from /guest-invite */}
+      <div className="mb-10">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40">
+            Applications · {applications.length}
+          </div>
+          <a
+            href="/guest-invite"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] uppercase tracking-[0.25em] font-mono text-white/45 hover:text-white"
+          >
+            View public page →
+          </a>
+        </div>
+        <div className="space-y-2">
+          {applications.length === 0 && (
+            <div className="text-sm text-white/40 font-mono">No applications yet — share rollat.vercel.app/guest-invite to start collecting submissions.</div>
+          )}
+          {applications.map((app) => {
+            const statusColor = app.status === "approved" ? "#10B981" : app.status === "rejected" ? "#FF3366" : ACCENT;
+            return (
+              <div key={app.id} className="glass rounded-sm p-4 flex items-start gap-4">
+                {app.logo_url ? (
+                  <img src={app.logo_url} alt="" className="w-10 h-10 rounded-sm object-cover shrink-0 border border-white/10" />
+                ) : (
+                  <div className="w-10 h-10 rounded-sm bg-white/5 shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold">${app.ticker}</span>
+                    <span className="text-white/55 truncate">{app.name}</span>
+                    <span
+                      className="px-1.5 py-0.5 rounded-sm text-[9px] font-mono uppercase tracking-widest"
+                      style={{ backgroundColor: `${statusColor}20`, color: statusColor }}
+                    >
+                      {app.status}
+                    </span>
+                  </div>
+                  <div className="text-xs text-white/45 font-mono mt-1 truncate">
+                    {app.contact} · {new Date(app.created_at).toUTCString().slice(5, 16)}
+                  </div>
+                  <div className="text-xs text-white/40 mt-1 flex items-center gap-3 flex-wrap">
+                    <a href={app.community_link} target="_blank" rel="noopener noreferrer" className="hover:text-white underline truncate max-w-[300px]">
+                      {app.community_link}
+                    </a>
+                    {app.contract_address && (
+                      <span className="font-mono text-[10px] text-white/35 truncate">
+                        CA: {app.contract_address.slice(0, 8)}…
+                      </span>
+                    )}
+                  </div>
+                  {app.notes && (
+                    <div className="text-xs text-white/55 mt-2 italic">"{app.notes}"</div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5 shrink-0">
+                  <Button size="sm" onClick={() => loadApplication(app)} style={{ backgroundColor: ACCENT, color: "#fff" }} className="h-7 px-2 text-[10px]">
+                    Use
+                  </Button>
+                  {app.status !== "approved" && (
+                    <Button size="sm" variant="ghost" onClick={() => setApplicationStatus(app.id, "approved")} className="h-7 px-2 text-[10px] text-emerald-400 hover:text-emerald-300">
+                      ✓ Approve
+                    </Button>
+                  )}
+                  {app.status !== "rejected" && (
+                    <Button size="sm" variant="ghost" onClick={() => setApplicationStatus(app.id, "rejected")} className="h-7 px-2 text-[10px] text-white/40 hover:text-crimson">
+                      ✗ Reject
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => deleteApplication(app.id)} className="h-7 px-2 text-[10px] text-white/30 hover:text-crimson">
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* History */}

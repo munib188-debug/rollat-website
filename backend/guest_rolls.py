@@ -319,6 +319,100 @@ async def run_due_rolls(col) -> int:
     return len(due)
 
 
+# ---------- public applications ----------
+
+class GuestApplication(BaseModel):
+    """A public submission from a project that wants to be in the next Guest Roll."""
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    ticker: str
+    logo_url: Optional[str] = None
+    community_link: str
+    contact: str                     # @handle on X/TG/Discord
+    contract_address: Optional[str] = None
+    notes: Optional[str] = None
+    status: str = "pending"          # pending | approved | rejected
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+async def submit_guest_application(col, payload: dict) -> dict:
+    """Public endpoint helper. Validates and stores a new application."""
+    name = _clean_str(payload.get("name"), 40)
+    ticker = _clean_str(payload.get("ticker"), 16).upper().lstrip("$")
+    logo_url = _clean_str(payload.get("logo_url"), 500) or None
+    community_link = _clean_str(payload.get("community_link"), 500)
+    contact = _clean_str(payload.get("contact"), 80)
+    contract_address = _clean_str(payload.get("contract_address"), 80) or None
+    notes = _clean_str(payload.get("notes"), 500) or None
+
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+    if not community_link:
+        raise HTTPException(status_code=400, detail="community link is required")
+    if not contact:
+        raise HTTPException(status_code=400, detail="contact (X / TG handle) is required")
+    for url, fld in [(logo_url, "logo_url"), (community_link, "community_link")]:
+        if url and not (url.startswith("http://") or url.startswith("https://")):
+            raise HTTPException(status_code=400, detail=f"{fld} must start with http(s)://")
+
+    # Soft duplicate guard — same ticker submitted within last 24h.
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    existing = await col.find_one({"ticker": ticker, "status": "pending", "created_at": {"$gte": cutoff}})
+    if existing:
+        raise HTTPException(status_code=409, detail=f"${ticker} already has a pending application — we'll get back to you")
+
+    app = GuestApplication(
+        name=name,
+        ticker=ticker,
+        logo_url=logo_url,
+        community_link=community_link,
+        contact=contact,
+        contract_address=contract_address,
+        notes=notes,
+    )
+    doc = app.model_dump()
+    await col.insert_one(doc)
+    return _normalize_app_doc(doc)
+
+
+def _normalize_app_doc(doc: Optional[dict]) -> Optional[dict]:
+    if not doc:
+        return None
+    out = {k: v for k, v in doc.items() if k != "_id"}
+    v = out.get("created_at")
+    if isinstance(v, datetime):
+        out["created_at"] = _ensure_utc(v).isoformat()
+    return out
+
+
+async def list_guest_applications(col, limit: int = 100) -> List[dict]:
+    cur = col.find({}).sort("created_at", -1).limit(limit)
+    docs = await cur.to_list(limit)
+    return [_normalize_app_doc(d) for d in docs]
+
+
+async def update_guest_application(col, app_id: str, *, status: str) -> dict:
+    if status not in ("pending", "approved", "rejected"):
+        raise HTTPException(status_code=400, detail="invalid status")
+    result = await col.update_one({"id": app_id}, {"$set": {"status": status}})
+    matched = getattr(result, "matched_count", None)
+    if matched == 0:
+        raise HTTPException(status_code=404, detail="application not found")
+    return _normalize_app_doc(await col.find_one({"id": app_id}))
+
+
+async def delete_guest_application(col, app_id: str) -> dict:
+    result = await col.delete_one({"id": app_id})
+    deleted = getattr(result, "deleted_count", None)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="application not found")
+    return {"ok": True}
+
+
 async def guest_scheduler_loop(get_col) -> None:
     """Background asyncio task. Polls every 3s for due rolls."""
     logger.info("[guest_roll] scheduler started")

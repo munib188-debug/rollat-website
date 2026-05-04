@@ -43,6 +43,10 @@ from guest_rolls import (
     fetch_current_guest_roll,
     list_guest_rolls,
     guest_scheduler_loop,
+    submit_guest_application,
+    list_guest_applications,
+    update_guest_application,
+    delete_guest_application,
 )
 from telegram_bot import (
     announce_daily_spin_started,
@@ -1007,6 +1011,43 @@ async def guest_roll_cancel(roll_id: str, admin: str = Depends(get_admin_wallet)
 @api_router.get("/guest/rolls")
 async def guest_rolls_history(admin: str = Depends(get_admin_wallet)):
     return await list_guest_rolls(_get_col("guest_rolls"), limit=50)
+
+
+# ---------- Guest Roll public applications ----------
+class GuestApplyRequest(BaseModel):
+    name: str
+    ticker: str
+    logo_url: Optional[str] = None
+    community_link: str
+    contact: str
+    contract_address: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@api_router.post("/guest/apply")
+@limiter.limit("3/minute")
+async def guest_apply(request: Request, req: GuestApplyRequest):
+    """Public — projects submit themselves to be in a future Guest Roll."""
+    return await submit_guest_application(_get_col("guest_applications"), req.model_dump())
+
+
+@api_router.get("/guest/applications")
+async def guest_applications_list(admin: str = Depends(get_admin_wallet)):
+    return await list_guest_applications(_get_col("guest_applications"), limit=200)
+
+
+class GuestApplicationStatusRequest(BaseModel):
+    status: str  # pending | approved | rejected
+
+
+@api_router.patch("/guest/applications/{app_id}")
+async def guest_application_update(app_id: str, req: GuestApplicationStatusRequest, admin: str = Depends(get_admin_wallet)):
+    return await update_guest_application(_get_col("guest_applications"), app_id, status=req.status)
+
+
+@api_router.delete("/guest/applications/{app_id}")
+async def guest_application_delete(app_id: str, admin: str = Depends(get_admin_wallet)):
+    return await delete_guest_application(_get_col("guest_applications"), app_id)
 
 
 # ---------- WebSocket ----------
