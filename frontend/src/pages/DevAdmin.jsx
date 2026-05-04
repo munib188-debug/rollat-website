@@ -156,6 +156,11 @@ export default function DevAdmin() {
             </span>
           </Link>
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <Link to="/guest" className="hidden md:inline-flex items-center px-3 h-9 border border-white/10 hover:border-white/30 text-white/60 hover:text-white rounded-sm font-mono text-[11px] uppercase tracking-widest">
+                Guest Roll →
+              </Link>
+            )}
             {connectedAddr && (
               <span className="hidden md:inline-flex items-center gap-2 px-3 h-9 border border-white/10 text-white/70 rounded-sm font-mono text-[11px] uppercase tracking-widest">
                 {truncWallet(connectedAddr)}

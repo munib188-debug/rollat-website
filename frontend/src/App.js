@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const DevAdmin = lazy(() => import("@/pages/DevAdmin"));
+const GuestAdmin = lazy(() => import("@/pages/GuestAdmin"));
 import { SpinPhaseProvider } from "@/lib/SpinPhaseContext";
 import SolanaWalletProvider from "@/lib/SolanaWalletProvider";
 import { AuthProvider } from "@/lib/AuthContext";
@@ -48,6 +49,7 @@ function App() {
                     <Route path="/" element={<Landing />} />
                     <Route path="/dashboard" element={<Dashboard />} />
                     <Route path="/dev" element={<DevAdmin />} />
+                    <Route path="/guest" element={<GuestAdmin />} />
                   </Routes>
                 </Suspense>
               </BrowserRouter>

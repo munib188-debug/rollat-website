@@ -36,6 +36,14 @@ from dev_rolls import (
     list_dev_rolls,
     dev_scheduler_loop,
 )
+from guest_rolls import (
+    create_guest_roll,
+    update_guest_roll,
+    cancel_guest_roll,
+    fetch_current_guest_roll,
+    list_guest_rolls,
+    guest_scheduler_loop,
+)
 from telegram_bot import (
     announce_daily_spin_started,
     announce_daily_spin_winner,
@@ -445,9 +453,15 @@ async def on_startup():
     except Exception:
         # in-memory fallback collections don't support indexes
         pass
+    try:
+        await _get_col("guest_rolls").create_index([("scheduled_at", 1), ("phase", 1)])
+    except Exception:
+        pass
 
     # Background task: scan for due dev rolls every few seconds and run them.
     asyncio.create_task(dev_scheduler_loop(_get_col))
+    # Background task: same for guest rolls (10-coin partner spins).
+    asyncio.create_task(guest_scheduler_loop(_get_col))
     # Background task: 10-min daily spin reminder.
     asyncio.create_task(daily_reminder_loop())
 
@@ -929,6 +943,70 @@ async def dev_roll_cancel(roll_id: str, admin: str = Depends(get_admin_wallet)):
 @api_router.get("/dev/rolls")
 async def dev_rolls_history(admin: str = Depends(get_admin_wallet)):
     return await list_dev_rolls(_get_col("dev_rolls"), limit=50)
+
+
+# ---------- Guest Roll routes ----------
+class GuestEntryRequest(BaseModel):
+    name: str
+    ticker: str
+    logo_url: Optional[str] = None
+    link: Optional[str] = None
+
+
+class GuestRollCreateRequest(BaseModel):
+    title: Optional[str] = None
+    prize_label: Optional[str] = "DexScreener Boost"
+    entries: List[GuestEntryRequest]
+    scheduled_at: str  # ISO 8601
+
+
+class GuestRollUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    prize_label: Optional[str] = None
+    entries: Optional[List[GuestEntryRequest]] = None  # replaces the list
+    scheduled_at: Optional[str] = None
+
+
+@api_router.post("/guest/roll")
+async def guest_roll_create(req: GuestRollCreateRequest, admin: str = Depends(get_admin_wallet)):
+    sched = _parse_scheduled_at(req.scheduled_at)
+    return await create_guest_roll(
+        _get_col("guest_rolls"),
+        title=req.title,
+        prize_label=req.prize_label,
+        entries=[e.model_dump() for e in req.entries],
+        scheduled_at=sched,
+        created_by=admin,
+    )
+
+
+@api_router.get("/guest/roll/current")
+async def guest_roll_current():
+    return await fetch_current_guest_roll(_get_col("guest_rolls"))
+
+
+@api_router.patch("/guest/roll/{roll_id}")
+async def guest_roll_update(roll_id: str, req: GuestRollUpdateRequest, admin: str = Depends(get_admin_wallet)):
+    sched = _parse_scheduled_at(req.scheduled_at) if req.scheduled_at else None
+    entries = [e.model_dump() for e in req.entries] if req.entries is not None else None
+    return await update_guest_roll(
+        _get_col("guest_rolls"),
+        roll_id,
+        title=req.title,
+        prize_label=req.prize_label,
+        entries=entries,
+        scheduled_at=sched,
+    )
+
+
+@api_router.delete("/guest/roll/{roll_id}")
+async def guest_roll_cancel(roll_id: str, admin: str = Depends(get_admin_wallet)):
+    return await cancel_guest_roll(_get_col("guest_rolls"), roll_id)
+
+
+@api_router.get("/guest/rolls")
+async def guest_rolls_history(admin: str = Depends(get_admin_wallet)):
+    return await list_guest_rolls(_get_col("guest_rolls"), limit=50)
 
 
 # ---------- WebSocket ----------

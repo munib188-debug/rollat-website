@@ -6,6 +6,7 @@ import PreviousWinner from "@/components/site/PreviousWinner";
 import HowItWorks from "@/components/site/HowItWorks";
 import RouletteArena from "@/components/site/RouletteArena";
 import DevRollArena from "@/components/site/DevRollArena";
+import GuestRollArena from "@/components/site/GuestRollArena";
 import QualifiedWallets from "@/components/site/QualifiedWallets";
 import WalletCheck from "@/components/site/WalletCheck";
 import Tokenomics from "@/components/site/Tokenomics";
@@ -45,6 +46,7 @@ export default function Landing() {
         <S name="HowItWorks"><HowItWorks /></S>
         <S name="RouletteArena"><RouletteArena /></S>
         <S name="DevRollArena"><DevRollArena /></S>
+        <S name="GuestRollArena"><GuestRollArena /></S>
         <S name="QualifiedWallets"><QualifiedWallets /></S>
         <S name="WalletCheck"><WalletCheck /></S>
         <S name="Tokenomics"><Tokenomics /></S>

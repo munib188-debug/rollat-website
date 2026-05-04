@@ -173,6 +173,54 @@ async def announce_daily_spin_winner(
     )
 
 
+async def announce_guest_roll_scheduled(
+    title: str | None,
+    prize_label: str,
+    entry_count: int,
+    scheduled_at_iso: str,
+) -> None:
+    label = title or "Guest Roll"
+    time_str = scheduled_at_iso[:16].replace("T", " ") + " UTC" if scheduled_at_iso else "TBA"
+    await _send(
+        f"🎟️ *{label} — Scheduled*\n"
+        f"🏆 Prize: `{prize_label}`\n"
+        f"🪙 {entry_count} coins competing\n"
+        f"⏰ Spins at: `{time_str}`\n\n"
+        f"Watch live → {SITE}/#guest-roll"
+    )
+
+
+async def announce_guest_roll_spinning(
+    title: str | None,
+    prize_label: str,
+    entry_count: int,
+) -> None:
+    label = title or "Guest Roll"
+    await _send(
+        f"🎡 *{label} — Spinning Now\\!*\n"
+        f"🏆 `{prize_label}` · {entry_count} coins\n\n"
+        f"{SITE}/#guest-roll"
+    )
+
+
+async def announce_guest_roll_winner(
+    title: str | None,
+    prize_label: str,
+    winner_name: str,
+    winner_ticker: str,
+    winner_link: str | None,
+) -> None:
+    label = title or "Guest Roll"
+    link_line = f"[Community]({winner_link})\n" if winner_link else ""
+    await _send(
+        f"🏆 *{label} — Winner\\!*\n"
+        f"🥇 `${winner_ticker}` · {winner_name}\n"
+        f"🎁 Prize: `{prize_label}`\n"
+        f"{link_line}\n"
+        f"{SITE}"
+    )
+
+
 async def announce_buy_cta() -> None:
     """Sent after every winner reveal to drive buys."""
     await _send(
