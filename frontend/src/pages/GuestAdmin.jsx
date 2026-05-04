@@ -8,6 +8,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useAuth } from "@/lib/AuthContext";
 import { api } from "@/lib/api";
 import WalletPicker from "@/components/site/WalletPicker";
+import LogoUpload from "@/components/site/LogoUpload";
 
 const ACCENT = "#A855F7";
 
@@ -338,12 +339,13 @@ export default function GuestAdmin() {
                   onChange={(ev) => updateEntry(i, "ticker", ev.target.value)}
                   maxLength={16}
                 />
-                <Input
-                  className="col-span-3"
-                  placeholder="Logo URL (https://…)"
-                  value={e.logo_url}
-                  onChange={(ev) => updateEntry(i, "logo_url", ev.target.value)}
-                />
+                <div className="col-span-3">
+                  <LogoUpload
+                    value={e.logo_url || null}
+                    onChange={(v) => updateEntry(i, "logo_url", v || "")}
+                    compact
+                  />
+                </div>
                 <Input
                   className="col-span-2"
                   placeholder="Community link"

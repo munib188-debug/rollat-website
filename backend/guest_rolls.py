@@ -102,7 +102,8 @@ def validate_entries(raw: List[dict]) -> List[GuestEntry]:
             raise HTTPException(status_code=400, detail=f"entry {i+1} must be an object")
         name = _clean_str(item.get("name"), 40)
         ticker = _clean_str(item.get("ticker"), 16).upper().lstrip("$")
-        logo_url = _clean_str(item.get("logo_url"), 500) or None
+        # logo_url accepts http(s) URLs OR base64 data URLs from direct upload (compressed client-side, ~50KB typical).
+        logo_url = _clean_str(item.get("logo_url"), 400_000) or None
         link = _clean_str(item.get("link"), 500) or None
 
         if not name:
@@ -114,8 +115,8 @@ def validate_entries(raw: List[dict]) -> List[GuestEntry]:
         seen_tickers.add(ticker)
 
         # URL sanity (don't be too strict — admin entry, not user input).
-        if logo_url and not (logo_url.startswith("http://") or logo_url.startswith("https://")):
-            raise HTTPException(status_code=400, detail=f"entry {i+1}: logo_url must start with http(s)://")
+        if logo_url and not (logo_url.startswith("http://") or logo_url.startswith("https://") or logo_url.startswith("data:image/")):
+            raise HTTPException(status_code=400, detail=f"entry {i+1}: logo must be an image URL or uploaded image")
         if link and not (link.startswith("http://") or link.startswith("https://")):
             raise HTTPException(status_code=400, detail=f"entry {i+1}: link must start with http(s)://")
 
@@ -341,7 +342,8 @@ async def submit_guest_application(col, payload: dict) -> dict:
     """Public endpoint helper. Validates and stores a new application."""
     name = _clean_str(payload.get("name"), 40)
     ticker = _clean_str(payload.get("ticker"), 16).upper().lstrip("$")
-    logo_url = _clean_str(payload.get("logo_url"), 500) or None
+    # logo_url accepts http(s) URLs OR base64 data URLs from direct upload.
+    logo_url = _clean_str(payload.get("logo_url"), 400_000) or None
     community_link = _clean_str(payload.get("community_link"), 500)
     contact = _clean_str(payload.get("contact"), 80)
     contract_address = _clean_str(payload.get("contract_address"), 80) or None
@@ -355,9 +357,10 @@ async def submit_guest_application(col, payload: dict) -> dict:
         raise HTTPException(status_code=400, detail="community link is required")
     if not contact:
         raise HTTPException(status_code=400, detail="contact (X / TG handle) is required")
-    for url, fld in [(logo_url, "logo_url"), (community_link, "community_link")]:
-        if url and not (url.startswith("http://") or url.startswith("https://")):
-            raise HTTPException(status_code=400, detail=f"{fld} must start with http(s)://")
+    if logo_url and not (logo_url.startswith("http://") or logo_url.startswith("https://") or logo_url.startswith("data:image/")):
+        raise HTTPException(status_code=400, detail="logo must be an image URL or uploaded image")
+    if not (community_link.startswith("http://") or community_link.startswith("https://")):
+        raise HTTPException(status_code=400, detail="community_link must start with http(s)://")
 
     # Soft duplicate guard — same ticker submitted within last 24h.
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)

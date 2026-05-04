@@ -6,6 +6,7 @@ import { ArrowLeft, Trophy, Eye, Coins, Send, CheckCircle2, ChevronDown, Externa
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
+import LogoUpload from "@/components/site/LogoUpload";
 
 const ACCENT = "#A855F7";
 
@@ -283,8 +284,8 @@ function ApplicationForm({ initialTicker }) {
           <Field label="Ticker *">
             <Input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="$BONK" maxLength={16} />
           </Field>
-          <Field label="Logo URL (PNG / JPG)">
-            <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…" />
+          <Field label="Logo (upload or paste URL)">
+            <LogoUpload value={logoUrl} onChange={(v) => setLogoUrl(v || "")} />
           </Field>
           <Field label="Community link *">
             <Input value={communityLink} onChange={(e) => setCommunityLink(e.target.value)} placeholder="https://t.me/… or https://x.com/…" />
