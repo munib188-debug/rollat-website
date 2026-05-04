@@ -1,17 +1,15 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trophy, ExternalLink, Zap, Clock } from "lucide-react";
 import { useGuestRoll } from "@/lib/useGuestRoll";
 import { useCountdown, pad } from "@/lib/useCountdown";
 import { launchConfetti } from "@/lib/confetti";
 
-// Electric purple — distinct from the gold main wheel and crimson dev roll.
 const ACCENT = "#A855F7";
 
-// Wheel animation must match GUEST_SPIN_ANIMATION_SECS in backend/guest_rolls.py
+// Reel animation must match GUEST_SPIN_ANIMATION_SECS in backend/guest_rolls.py
 const SPIN_DURATION_MS = 10_000;
 
-// Per-segment palette — 10 distinct hues so adjacent slices read clearly.
 const SLICE_COLORS = [
   "#A855F7", "#06B6D4", "#F59E0B", "#EC4899", "#10B981",
   "#3B82F6", "#F43F5E", "#84CC16", "#8B5CF6", "#0EA5E9",
@@ -40,7 +38,7 @@ export default function GuestRollArena() {
         </div>
 
         <p className="text-white/55 max-w-2xl mb-10 text-base md:text-lg">
-          Ten partner coins. One winner. The wheel spins, and one community walks away with a
+          Ten partner coins. One winner. The reel spins, and one community walks away with a
           prize like a DexScreener boost.
           <span className="text-white/35"> &nbsp;Cross-community, off-cycle.</span>
         </p>
@@ -133,168 +131,196 @@ function EmptyState() {
   );
 }
 
-// ---------- Wheel renderer ----------
+// ---------- Slot-machine reel ----------
+
+const CARD_W = 132;
+const CARD_GAP = 12;
+const STEP = CARD_W + CARD_GAP;
+const REPEATS = 14; // total card count = entries.length * REPEATS for landing room
 
 /**
- * SVG wheel of N segments. Rotates via Framer Motion.
- * - When `winnerIndex` is provided, the wheel decelerates and parks the winner
- *   under the top pointer.
- * - When `spinning` is true and no winner yet, it free-spins.
- * - When idle, it shows the static layout.
+ * Horizontal slot-machine reel.
+ *  - `winnerIndex` provided → decelerate and park winner under the center pointer.
+ *  - `spinning` true (no winner yet) → continuous fast scroll.
+ *  - Otherwise → static preview row.
  */
-function GuestWheel({ entries, winnerIndex = null, spinning = false, size = 480 }) {
+function GuestReel({ entries, winnerIndex = null, spinning = false, height = 168 }) {
+  const containerRef = useRef(null);
+  const [containerW, setContainerW] = useState(0);
   const n = entries.length;
-  const sliceAngle = 360 / n;
-  const cx = size / 2;
-  const cy = size / 2;
-  const radius = size / 2 - 6;
 
-  // Wheel rotation logic. Each tick we set a target rotation.
-  // For static layout: 0deg. For spinning (no winner yet): 5 full rotations.
-  // For landing on winner: align winner slice midpoint with the top (270° in SVG / -90° / pointing up).
-  const targetRotation = useMemo(() => {
+  useLayoutEffect(() => {
+    const measure = () => setContainerW(containerRef.current?.clientWidth || 0);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  const isStatic = winnerIndex == null && !spinning;
+
+  // Repeated entries for animated states; single pass for static preview.
+  const cards = useMemo(() => {
+    if (isStatic) return entries.map((e, i) => ({ entry: e, srcIndex: i, key: `s-${i}` }));
+    return Array.from({ length: n * REPEATS }, (_, i) => ({
+      entry: entries[i % n],
+      srcIndex: i % n,
+      key: `r-${i}`,
+    }));
+  }, [entries, isStatic, n]);
+
+  const targetX = useMemo(() => {
+    if (isStatic) return 0;
     if (winnerIndex == null) {
-      return spinning ? 360 * 5 : 0;
+      // Free spin: shift left by one full cycle. Framer Motion replays each render
+      // when transition.repeat is Infinity, giving a seamless conveyor.
+      return -n * STEP;
     }
-    // Each slice's midpoint angle (CCW from 3 o'clock in math convention; we use clockwise from 12 o'clock).
-    // We draw slice i starting at angle i*sliceAngle (clockwise from 12). Midpoint = (i + 0.5)*sliceAngle.
-    // We want that midpoint at the top (0°). So rotate by -(i+0.5)*sliceAngle.
-    // Add 8 full rotations for drama.
-    const winnerMid = (winnerIndex + 0.5) * sliceAngle;
-    return 360 * 8 - winnerMid;
-  }, [winnerIndex, spinning, sliceAngle]);
+    // Land: center the chosen winner under the pointer at containerW/2.
+    // Pick a card index in the back half of the strip for dramatic deceleration room.
+    const finalCardIdx = Math.floor(REPEATS * 0.85) * n + winnerIndex;
+    const cardCenterFromStart = finalCardIdx * STEP + CARD_W / 2;
+    return -(cardCenterFromStart - containerW / 2);
+  }, [isStatic, winnerIndex, containerW, n]);
 
   const transition = useMemo(() => {
-    if (winnerIndex == null && !spinning) return { duration: 0 };
+    if (isStatic) return { duration: 0 };
     if (winnerIndex == null) {
-      return { duration: 4, ease: "linear", repeat: Infinity };
+      return { duration: 1.2, ease: "linear", repeat: Infinity };
     }
-    return { duration: SPIN_DURATION_MS / 1000, ease: [0.2, 0.85, 0.25, 1] };
-  }, [winnerIndex, spinning]);
+    return { duration: SPIN_DURATION_MS / 1000, ease: [0.15, 0.7, 0.2, 1] };
+  }, [isStatic, winnerIndex]);
+
+  // Track which card is currently centered for highlight (only meaningful when landed).
+  const winnerSrcIndex = winnerIndex;
 
   return (
-    <div className="relative mx-auto" style={{ width: size, height: size }}>
-      {/* Outer glow */}
+    <div className="relative" style={{ height: height + 24 }}>
+      {/* Soft glow behind the reel */}
       <div
-        className="absolute inset-0 rounded-full blur-3xl pointer-events-none"
-        style={{ background: `radial-gradient(50% 50% at 50% 50%, ${ACCENT}30 0%, transparent 70%)` }}
+        className="absolute inset-0 pointer-events-none"
+        style={{ background: `radial-gradient(60% 80% at 50% 50%, ${ACCENT}1A 0%, transparent 70%)` }}
       />
 
-      {/* Top pointer */}
+      {/* Top + bottom guide rails */}
+      <div className="absolute left-0 right-0 top-0 h-px" style={{ backgroundColor: `${ACCENT}40` }} />
+      <div className="absolute left-0 right-0 bottom-0 h-px" style={{ backgroundColor: `${ACCENT}40` }} />
+
+      {/* Center pointer (top arrow) */}
       <div
-        className="absolute left-1/2 -translate-x-1/2 z-20 pointer-events-none"
-        style={{ top: -4 }}
+        className="absolute left-1/2 -translate-x-1/2 z-30 pointer-events-none"
+        style={{ top: -10 }}
         aria-hidden
       >
         <div
           className="w-0 h-0"
           style={{
-            borderLeft: "14px solid transparent",
-            borderRight: "14px solid transparent",
-            borderTop: `22px solid ${ACCENT}`,
-            filter: `drop-shadow(0 0 12px ${ACCENT})`,
+            borderLeft: "10px solid transparent",
+            borderRight: "10px solid transparent",
+            borderTop: `16px solid ${ACCENT}`,
+            filter: `drop-shadow(0 0 8px ${ACCENT})`,
           }}
         />
       </div>
 
-      {/* Spinning SVG */}
-      <motion.svg
-        width={size}
-        height={size}
-        viewBox={`0 0 ${size} ${size}`}
-        animate={{ rotate: targetRotation }}
-        transition={transition}
-        style={{ originX: "50%", originY: "50%" }}
-        className="relative z-10"
+      {/* Selection frame (centered) */}
+      <div
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none rounded-sm"
+        style={{
+          width: CARD_W + 10,
+          height: height + 10,
+          border: `2px solid ${ACCENT}`,
+          boxShadow: `0 0 24px ${ACCENT}80, inset 0 0 16px ${ACCENT}30`,
+        }}
+      />
+
+      {/* Edge fades */}
+      <div
+        className="absolute left-0 top-0 bottom-0 w-24 z-10 pointer-events-none"
+        style={{ background: "linear-gradient(to right, #0A0D0B 5%, rgba(10,13,11,0.6) 60%, transparent 100%)" }}
+      />
+      <div
+        className="absolute right-0 top-0 bottom-0 w-24 z-10 pointer-events-none"
+        style={{ background: "linear-gradient(to left, #0A0D0B 5%, rgba(10,13,11,0.6) 60%, transparent 100%)" }}
+      />
+
+      {/* Reel viewport */}
+      <div
+        ref={containerRef}
+        className="overflow-hidden relative"
+        style={{ height: height + 16, paddingTop: 8, paddingBottom: 8 }}
       >
-        <defs>
-          <radialGradient id="centerHub" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#1a1a1a" />
-            <stop offset="100%" stopColor="#0a0a0a" />
-          </radialGradient>
-        </defs>
-
-        {entries.map((entry, i) => {
-          const startA = i * sliceAngle - 90; // -90 so slice 0 starts at top
-          const endA = startA + sliceAngle;
-          const path = describeArc(cx, cy, radius, startA, endA);
-          const midA = startA + sliceAngle / 2;
-          const labelR = radius * 0.7;
-          const labelX = cx + labelR * Math.cos((midA * Math.PI) / 180);
-          const labelY = cy + labelR * Math.sin((midA * Math.PI) / 180);
-          const fill = SLICE_COLORS[i % SLICE_COLORS.length];
-
-          // Logo position closer to outer edge
-          const logoR = radius * 0.78;
-          const logoX = cx + logoR * Math.cos((midA * Math.PI) / 180);
-          const logoY = cy + logoR * Math.sin((midA * Math.PI) / 180);
-          const logoSize = Math.max(28, size * 0.07);
-
-          return (
-            <g key={`${entry.ticker}-${i}`}>
-              <path
-                d={path}
-                fill={fill}
-                fillOpacity={0.92}
-                stroke="#0A0D0B"
-                strokeWidth={2}
+        {isStatic ? (
+          // Static preview: scroll-x, justify-start so user can see the lineup.
+          <div className="flex justify-center" style={{ gap: CARD_GAP }}>
+            {cards.map(({ entry, srcIndex, key }) => (
+              <ReelCard
+                key={key}
+                entry={entry}
+                colorIndex={srcIndex}
+                height={height}
+                highlight={false}
               />
-              {/* Ticker text — rotated to read along the slice */}
-              <text
-                x={labelX}
-                y={labelY}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fontSize={Math.max(12, size * 0.028)}
-                fontWeight={800}
-                fontFamily="'JetBrains Mono', monospace"
-                fill="#0A0D0B"
-                transform={`rotate(${midA + 90} ${labelX} ${labelY})`}
-                style={{ pointerEvents: "none", letterSpacing: "0.05em" }}
-              >
-                ${entry.ticker}
-              </text>
-              {/* Coin logo (if provided) */}
-              {entry.logo_url && (
-                <image
-                  href={entry.logo_url}
-                  x={logoX - logoSize / 2}
-                  y={logoY - logoSize / 2}
-                  width={logoSize}
-                  height={logoSize}
-                  preserveAspectRatio="xMidYMid slice"
-                  clipPath={`circle(${logoSize / 2}px at ${logoSize / 2}px ${logoSize / 2}px)`}
-                  style={{ pointerEvents: "none" }}
-                />
-              )}
-            </g>
-          );
-        })}
-
-        {/* Center hub */}
-        <circle cx={cx} cy={cy} r={size * 0.11} fill="url(#centerHub)" stroke={ACCENT} strokeWidth={2} />
-        <circle cx={cx} cy={cy} r={size * 0.04} fill={ACCENT} />
-      </motion.svg>
+            ))}
+          </div>
+        ) : (
+          <motion.div
+            className="flex"
+            style={{ gap: CARD_GAP, willChange: "transform" }}
+            animate={{ x: targetX }}
+            transition={transition}
+            initial={false}
+          >
+            {cards.map(({ entry, srcIndex, key }) => (
+              <ReelCard
+                key={key}
+                entry={entry}
+                colorIndex={srcIndex}
+                height={height}
+                highlight={winnerSrcIndex != null && srcIndex === winnerSrcIndex}
+              />
+            ))}
+          </motion.div>
+        )}
+      </div>
     </div>
   );
 }
 
-// SVG arc path helper. Builds a pie slice from (startAngle, endAngle) in degrees.
-function describeArc(cx, cy, r, startAngle, endAngle) {
-  const start = polarToCartesian(cx, cy, r, endAngle);
-  const end = polarToCartesian(cx, cy, r, startAngle);
-  const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
-  return [
-    `M ${cx} ${cy}`,
-    `L ${end.x} ${end.y}`,
-    `A ${r} ${r} 0 ${largeArc} 0 ${start.x} ${start.y}`,
-    "Z",
-  ].join(" ");
-}
-
-function polarToCartesian(cx, cy, r, angleDeg) {
-  const a = (angleDeg * Math.PI) / 180;
-  return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+function ReelCard({ entry, colorIndex, height, highlight }) {
+  const color = SLICE_COLORS[colorIndex % SLICE_COLORS.length];
+  return (
+    <div
+      className="shrink-0 rounded-sm border flex flex-col items-center justify-center gap-2 px-2 py-3 bg-obsidian-900/70 backdrop-blur-sm transition-shadow"
+      style={{
+        width: CARD_W,
+        height,
+        borderColor: highlight ? color : `${color}40`,
+        boxShadow: highlight ? `0 0 32px ${color}aa, inset 0 0 12px ${color}30` : "none",
+      }}
+    >
+      {entry?.logo_url ? (
+        <img
+          src={entry.logo_url}
+          alt=""
+          className="w-14 h-14 rounded-full object-cover"
+          style={{ border: `2px solid ${color}` }}
+        />
+      ) : (
+        <div
+          className="w-14 h-14 rounded-full flex items-center justify-center font-black text-xl"
+          style={{ backgroundColor: `${color}30`, color, border: `2px solid ${color}80` }}
+        >
+          {entry?.ticker?.[0] || "?"}
+        </div>
+      )}
+      <div className="font-mono font-black text-sm leading-none" style={{ color }}>
+        ${entry?.ticker}
+      </div>
+      <div className="text-[10px] text-white/55 truncate w-full text-center font-mono uppercase tracking-wider">
+        {entry?.name}
+      </div>
+    </div>
+  );
 }
 
 // ---------- Phase views ----------
@@ -304,41 +330,36 @@ function ScheduledView({ roll }) {
   const entries = roll.entries || [];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-2 glass rounded-sm p-6 md:p-10 relative overflow-hidden">
-        <div className="absolute -top-12 -right-12 w-72 h-72 rounded-full blur-3xl" style={{ backgroundColor: `${ACCENT}15` }} />
-        <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-4" style={{ color: ACCENT }}>
-          Spins In
-        </div>
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-3 font-mono mb-6">
-          {[
-            { label: "DAYS", v: t.d },
-            { label: "HRS", v: t.h },
-            { label: "MIN", v: t.m },
-            { label: "SEC", v: t.s },
-          ].map((c, i) => (
-            <div key={c.label} className="flex items-end gap-3">
-              <div>
-                <div className="text-[9px] tracking-[0.25em] text-white/40 mb-0.5">{c.label}</div>
-                <div className="text-4xl md:text-5xl font-black tabular-nums" style={{ color: ACCENT }}>
-                  {pad(c.v)}
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 glass rounded-sm p-6 md:p-10 relative overflow-hidden">
+          <div className="absolute -top-12 -right-12 w-72 h-72 rounded-full blur-3xl" style={{ backgroundColor: `${ACCENT}15` }} />
+          <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-4" style={{ color: ACCENT }}>
+            Spins In
+          </div>
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3 font-mono mb-6">
+            {[
+              { label: "DAYS", v: t.d },
+              { label: "HRS", v: t.h },
+              { label: "MIN", v: t.m },
+              { label: "SEC", v: t.s },
+            ].map((c, i) => (
+              <div key={c.label} className="flex items-end gap-3">
+                <div>
+                  <div className="text-[9px] tracking-[0.25em] text-white/40 mb-0.5">{c.label}</div>
+                  <div className="text-4xl md:text-5xl font-black tabular-nums" style={{ color: ACCENT }}>
+                    {pad(c.v)}
+                  </div>
                 </div>
+                {i < 3 && <span className="text-3xl text-white/20 pb-1">:</span>}
               </div>
-              {i < 3 && <span className="text-3xl text-white/20 pb-1">:</span>}
-            </div>
-          ))}
-        </div>
-        <div className="text-xs text-white/45 font-mono uppercase tracking-widest">
-          {new Date(roll.scheduled_at).toUTCString()}
+            ))}
+          </div>
+          <div className="text-xs text-white/45 font-mono uppercase tracking-widest">
+            {new Date(roll.scheduled_at).toUTCString()}
+          </div>
         </div>
 
-        {/* Static preview wheel */}
-        <div className="mt-8">
-          <GuestWheel entries={entries} size={420} />
-        </div>
-      </div>
-
-      <div className="space-y-4">
         <div className="glass rounded-sm p-6 md:p-8 relative overflow-hidden">
           <div
             className="absolute inset-0 pointer-events-none"
@@ -357,33 +378,14 @@ function ScheduledView({ roll }) {
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="glass rounded-sm p-5">
-          <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-3">
-            Lineup · {entries.length}
-          </div>
-          <ul className="space-y-1.5 max-h-[360px] overflow-y-auto pr-2 scrollbar-hidden">
-            {entries.map((e, i) => (
-              <li
-                key={e.ticker}
-                className="flex items-center gap-3 px-2 py-1.5 rounded-sm border bg-obsidian-900/40"
-                style={{ borderColor: `${SLICE_COLORS[i % SLICE_COLORS.length]}30` }}
-              >
-                <span
-                  className="w-2 h-2 rounded-full shrink-0"
-                  style={{ backgroundColor: SLICE_COLORS[i % SLICE_COLORS.length] }}
-                />
-                {e.logo_url && (
-                  <img src={e.logo_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
-                )}
-                <span className="font-mono text-[11px] font-bold" style={{ color: SLICE_COLORS[i % SLICE_COLORS.length] }}>
-                  ${e.ticker}
-                </span>
-                <span className="text-xs text-white/55 truncate flex-1">{e.name}</span>
-              </li>
-            ))}
-          </ul>
+      {/* Lineup reel — static preview */}
+      <div className="glass rounded-sm p-6 md:p-10 relative overflow-hidden">
+        <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-6" style={{ color: ACCENT }}>
+          Lineup · {entries.length} coins
         </div>
+        <GuestReel entries={entries} />
       </div>
     </div>
   );
@@ -402,7 +404,7 @@ function SpinningView({ roll }) {
         Spinning · Prize: {roll.prize_label}
       </div>
 
-      <GuestWheel entries={entries} spinning size={480} />
+      <GuestReel entries={entries} spinning height={184} />
 
       <div className="mt-8 text-center text-[10px] uppercase tracking-[0.3em] font-mono text-white/40">
         {entries.length} coins · uniform random · winner locks in shortly
@@ -423,84 +425,87 @@ function ResolvedView({ roll }) {
   }, []);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-6">
       <canvas
         ref={canvasRef}
         className="fixed inset-0 pointer-events-none"
         style={{ zIndex: 9999 }}
       />
-      <div
-        className="glass rounded-sm p-6 md:p-10 relative overflow-hidden"
-        style={{ borderColor: `${ACCENT}40` }}
-      >
+
+      <div className="glass rounded-sm p-6 md:p-10 relative overflow-hidden" style={{ borderColor: `${ACCENT}40` }}>
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ background: `radial-gradient(60% 60% at 50% 50%, ${ACCENT}24 0%, transparent 70%)` }}
+          style={{ background: `radial-gradient(60% 60% at 50% 50%, ${ACCENT}1A 0%, transparent 70%)` }}
         />
-        <GuestWheel entries={entries} winnerIndex={winnerIndex >= 0 ? winnerIndex : 0} size={420} />
+        <GuestReel entries={entries} winnerIndex={winnerIndex >= 0 ? winnerIndex : 0} height={184} />
       </div>
 
-      <div className="glass rounded-sm p-7 md:p-10 relative overflow-hidden flex flex-col justify-center" style={{ borderColor: `${ACCENT}40` }}>
+      <div className="glass rounded-sm p-7 md:p-10 relative overflow-hidden" style={{ borderColor: `${ACCENT}40` }}>
         <div
           className="absolute inset-0 pointer-events-none"
           style={{ background: `radial-gradient(70% 60% at 100% 0%, ${ACCENT}28 0%, transparent 60%)` }}
         />
-        <div className="relative">
-          <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-3" style={{ color: ACCENT }}>
-            <Trophy className="w-3 h-3 inline -mt-0.5 mr-1.5" />
-            Guest Roll Winner
-          </div>
-          <div className="flex items-center gap-4 mb-4">
-            {winner?.logo_url && (
-              <img
-                src={winner.logo_url}
-                alt=""
-                className="w-16 h-16 rounded-full object-cover border-2"
-                style={{ borderColor: ACCENT }}
-              />
-            )}
-            <div>
-              <div
-                className="font-mono font-black text-3xl md:text-5xl"
-                style={{ color: ACCENT }}
-                data-testid="guest-roll-winner-ticker"
-              >
-                ${winner?.ticker}
+        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-3" style={{ color: ACCENT }}>
+              <Trophy className="w-3 h-3 inline -mt-0.5 mr-1.5" />
+              Guest Roll Winner
+            </div>
+            <div className="flex items-center gap-4 mb-4">
+              {winner?.logo_url && (
+                <img
+                  src={winner.logo_url}
+                  alt=""
+                  className="w-16 h-16 rounded-full object-cover border-2"
+                  style={{ borderColor: ACCENT }}
+                />
+              )}
+              <div>
+                <div
+                  className="font-mono font-black text-3xl md:text-5xl"
+                  style={{ color: ACCENT }}
+                  data-testid="guest-roll-winner-ticker"
+                >
+                  ${winner?.ticker}
+                </div>
+                <div className="text-white/70 text-lg mt-1">{winner?.name}</div>
               </div>
-              <div className="text-white/70 text-lg mt-1">{winner?.name}</div>
+            </div>
+            <div className="border-t border-white/5 pt-4 mt-4">
+              <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-1">Prize</div>
+              <div className="font-display font-black text-2xl text-white">{roll.prize_label}</div>
             </div>
           </div>
-          <div className="border-t border-white/5 pt-4 mt-4">
-            <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-1">Prize</div>
-            <div className="font-display font-black text-2xl text-white">{roll.prize_label}</div>
-          </div>
-          <div className="mt-5 flex items-center gap-3 flex-wrap">
-            {winner?.link && (
+
+          <div className="flex flex-col items-start md:items-end gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              {winner?.link && (
+                <a
+                  href={winner.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border text-[11px] uppercase tracking-[0.2em] font-mono"
+                  style={{ borderColor: `${ACCENT}55`, color: ACCENT }}
+                >
+                  <ExternalLink className="w-3 h-3" /> Visit Community
+                </a>
+              )}
               <a
-                href={winner.link}
+                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
+                  `🏆 The $ROLLAT Guest Roll just landed on $${winner?.ticker} (${winner?.name})!\n\nThey win: ${roll.prize_label}.\n\nrollat.vercel.app`
+                )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border text-[11px] uppercase tracking-[0.2em] font-mono"
-                style={{ borderColor: `${ACCENT}55`, color: ACCENT }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border text-[11px] uppercase tracking-[0.2em] font-mono text-white/60 hover:text-white"
+                style={{ borderColor: "#ffffff20" }}
               >
-                <ExternalLink className="w-3 h-3" /> Visit Community
+                Share on X
               </a>
-            )}
-            <a
-              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
-                `🏆 The $ROLLAT Guest Roll just landed on $${winner?.ticker} (${winner?.name})!\n\nThey win: ${roll.prize_label}.\n\nrollat.vercel.app`
-              )}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border text-[11px] uppercase tracking-[0.2em] font-mono text-white/60 hover:text-white"
-              style={{ borderColor: "#ffffff20" }}
-            >
-              Share on X
-            </a>
-          </div>
-          <div className="text-xs text-white/40 mt-4 font-mono flex items-center gap-1.5">
-            <Clock className="w-3 h-3" />
-            {roll.resolved_at ? new Date(roll.resolved_at).toUTCString() : ""}
+            </div>
+            <div className="text-xs text-white/40 font-mono flex items-center gap-1.5">
+              <Clock className="w-3 h-3" />
+              {roll.resolved_at ? new Date(roll.resolved_at).toUTCString() : ""}
+            </div>
           </div>
         </div>
       </div>
