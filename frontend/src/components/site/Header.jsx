@@ -35,6 +35,7 @@ export default function Header() {
     { href: "/#mechanics", label: "Mechanics" },
     { href: "/#roulette-arena", label: "Live Spin" },
     { href: "/#dev-roll", label: "Dev Roll" },
+    { href: "/#guest-roll", label: "Guest Roll" },
     { href: "/#qualified", label: "Qualified" },
     { href: "/#tokenomics", label: "Tokenomics" },
     { href: "/#hall", label: "Hall of Fame" },
@@ -95,6 +96,19 @@ export default function Header() {
               >
                 <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
                 Dev
+              </Button>
+            </Link>
+          )}
+          {isAdmin && (
+            <Link to="/guest">
+              <Button
+                variant="outline"
+                className="border-purple-500/40 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 font-bold uppercase tracking-widest text-xs rounded-sm h-9 px-3"
+                data-testid="header-guest-btn"
+                title="Guest Roll admin (admin wallet only)"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
+                Guest
               </Button>
             </Link>
           )}
@@ -161,6 +175,9 @@ export default function Header() {
           <Link to="/dashboard" onClick={() => setOpen(false)} className="text-white/70">Dashboard</Link>
           {isAdmin && (
             <Link to="/dev" onClick={() => setOpen(false)} className="text-crimson font-bold">Dev Roll · Admin</Link>
+          )}
+          {isAdmin && (
+            <Link to="/guest" onClick={() => setOpen(false)} className="text-purple-400 font-bold">Guest Roll · Admin</Link>
           )}
           <Button
             onClick={() => { handleConnect(); setOpen(false); }}
