@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy, ExternalLink, Zap, Coins, Clock } from "lucide-react";
+import { Trophy, ExternalLink, Zap, Clock } from "lucide-react";
 import { useGuestRoll } from "@/lib/useGuestRoll";
 import { useCountdown, pad } from "@/lib/useCountdown";
 import { launchConfetti } from "@/lib/confetti";
 
 // Electric purple — distinct from the gold main wheel and crimson dev roll.
 const ACCENT = "#A855F7";
-const ACCENT_2 = "#06B6D4"; // cyan secondary for alternating slices
 
 // Wheel animation must match GUEST_SPIN_ANIMATION_SECS in backend/guest_rolls.py
 const SPIN_DURATION_MS = 10_000;
@@ -128,7 +127,7 @@ function EmptyState() {
         </div>
       </div>
       <div className="text-sm text-white/45 font-mono uppercase tracking-widest">
-        Want in? DM the team.
+        Community picks the lineup.
       </div>
     </div>
   );
