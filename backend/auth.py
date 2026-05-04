@@ -207,14 +207,39 @@ def issue_jwt(address: str) -> tuple[str, datetime]:
     return token, exp
 
 
+# In-memory revoked-JWT store. {jti -> exp_unix}. Trimmed lazily on each check;
+# entries naturally expire alongside the token TTL (1h), so the set stays bounded.
+_REVOKED_JTI: dict[str, int] = {}
+
+
+def revoke_jti(jti: str, exp_unix: int) -> None:
+    """Mark a JWT id as revoked until its natural expiration."""
+    if jti:
+        _REVOKED_JTI[jti] = exp_unix
+
+
+def _gc_revoked(now_unix: int) -> None:
+    if not _REVOKED_JTI:
+        return
+    expired = [k for k, exp in _REVOKED_JTI.items() if exp <= now_unix]
+    for k in expired:
+        _REVOKED_JTI.pop(k, None)
+
+
 def verify_jwt(token: str) -> dict:
     secret = _require_secret()
     try:
-        return jwt.decode(token, secret, algorithms=[JWT_ALG])
+        payload = jwt.decode(token, secret, algorithms=[JWT_ALG])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="invalid token")
+    now_unix = int(time.time())
+    _gc_revoked(now_unix)
+    jti = payload.get("jti")
+    if jti and jti in _REVOKED_JTI:
+        raise HTTPException(status_code=401, detail="token revoked")
+    return payload
 
 
 # -- FastAPI dependency for protected routes -------------------------------

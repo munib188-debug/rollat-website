@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { api } from "@/lib/api";
 import WalletPicker from "@/components/site/WalletPicker";
 import LogoUpload from "@/components/site/LogoUpload";
+import { safeHref, safeImgSrc } from "@/lib/utils";
 
 const ACCENT = "#A855F7";
 
@@ -397,8 +398,10 @@ export default function GuestAdmin() {
             const statusColor = app.status === "approved" ? "#10B981" : app.status === "rejected" ? "#FF3366" : ACCENT;
             return (
               <div key={app.id} className="glass rounded-sm p-4 flex items-start gap-4">
-                {app.logo_url ? (
-                  <img src={app.logo_url} alt="" className="w-10 h-10 rounded-sm object-cover shrink-0 border border-white/10" />
+                {safeImgSrc(app.logo_url) ? (
+                  <img src={safeImgSrc(app.logo_url)} alt="" className="w-10 h-10 rounded-sm object-cover shrink-0 border border-white/10" />
+                ) : app.logo_inline ? (
+                  <div className="w-10 h-10 rounded-sm bg-white/5 shrink-0 flex items-center justify-center text-[8px] font-mono text-white/40 uppercase tracking-widest">img</div>
                 ) : (
                   <div className="w-10 h-10 rounded-sm bg-white/5 shrink-0" />
                 )}
@@ -417,7 +420,7 @@ export default function GuestAdmin() {
                     {app.contact} · {new Date(app.created_at).toUTCString().slice(5, 16)}
                   </div>
                   <div className="text-xs text-white/40 mt-1 flex items-center gap-3 flex-wrap">
-                    <a href={app.community_link} target="_blank" rel="noopener noreferrer" className="hover:text-white underline truncate max-w-[300px]">
+                    <a href={safeHref(app.community_link)} target="_blank" rel="noopener noreferrer" className="hover:text-white underline truncate max-w-[300px]">
                       {app.community_link}
                     </a>
                     {app.contract_address && (

@@ -91,7 +91,14 @@ export function AuthProvider({ children }) {
     }
   }, [wallet, signingIn]);
 
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
+    // Best-effort server-side revocation; clears local state regardless.
+    try {
+      const { api } = await import("./api");
+      await api.post("/auth/logout");
+    } catch {
+      // network failure or already-invalid token — no-op
+    }
     clearAuth();
     setAuth(null);
   }, []);

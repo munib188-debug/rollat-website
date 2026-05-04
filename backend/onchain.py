@@ -302,7 +302,7 @@ async def fetch_wallet_balance(wallet: str, mint: Optional[str] = None) -> float
             _cache_set(cache_key, total, 30)
             return total
         except Exception as e:
-            logger.warning(f"wallet balance fetch failed for {wallet}: {e}")
+            logger.warning(f"wallet balance fetch failed for {wallet[:8]}…: {e}")
             return 0.0
 
 

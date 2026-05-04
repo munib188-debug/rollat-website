@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -319,7 +319,7 @@ async def _resolve_one_roll(col, roll: dict) -> None:
     # Suspense window matches the public widget's animation duration.
     await asyncio.sleep(DEV_SPIN_ANIMATION_SECS)
 
-    winner = random.choice(refreshed["wallets"])
+    winner = secrets.SystemRandom().choice(refreshed["wallets"])
     resolved_at = datetime.now(timezone.utc)
     await col.update_one(
         {"id": roll_id},

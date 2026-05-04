@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -39,6 +39,31 @@ RESOLVED_DISPLAY_SECS = 600
 # Hard limits on entry count. Wheel UI is tuned for ~10 but accommodates 3–12.
 MIN_ENTRIES = 3
 MAX_ENTRIES = 12
+
+# Logo data-URL hard cap. 256x256 JPEG @ 0.85 → ~85 KB base64; 100 KB leaves headroom.
+MAX_LOGO_LEN = 100_000
+
+# Per-IP daily submission cap for the public /guest/apply endpoint.
+MAX_APPS_PER_IP_PER_DAY = 5
+
+_secure_random = secrets.SystemRandom()
+
+
+def _is_safe_logo_url(s: str) -> bool:
+    """logo_url must be http(s) OR a base64 image data URL of an allowed raster type.
+    SVG is rejected because it can carry executable script."""
+    if not s:
+        return True
+    if s.startswith("http://") or s.startswith("https://"):
+        return True
+    # Allow only base64 raster types. Reject SVG, text, html, anything fancy.
+    return s.startswith((
+        "data:image/png;base64,",
+        "data:image/jpeg;base64,",
+        "data:image/jpg;base64,",
+        "data:image/webp;base64,",
+        "data:image/gif;base64,",
+    ))
 
 
 # ---------- model ----------
@@ -101,9 +126,9 @@ def validate_entries(raw: List[dict]) -> List[GuestEntry]:
         if not isinstance(item, dict):
             raise HTTPException(status_code=400, detail=f"entry {i+1} must be an object")
         name = _clean_str(item.get("name"), 40)
-        ticker = _clean_str(item.get("ticker"), 16).upper().lstrip("$")
-        # logo_url accepts http(s) URLs OR base64 data URLs from direct upload (compressed client-side, ~50KB typical).
-        logo_url = _clean_str(item.get("logo_url"), 400_000) or None
+        ticker = _clean_str(item.get("ticker"), 16).upper().removeprefix("$")
+        # logo_url accepts http(s) URLs OR base64 raster data URLs from direct upload.
+        logo_url = _clean_str(item.get("logo_url"), MAX_LOGO_LEN) or None
         link = _clean_str(item.get("link"), 500) or None
 
         if not name:
@@ -114,9 +139,10 @@ def validate_entries(raw: List[dict]) -> List[GuestEntry]:
             raise HTTPException(status_code=400, detail=f"duplicate ticker: ${ticker}")
         seen_tickers.add(ticker)
 
-        # URL sanity (don't be too strict — admin entry, not user input).
-        if logo_url and not (logo_url.startswith("http://") or logo_url.startswith("https://") or logo_url.startswith("data:image/")):
-            raise HTTPException(status_code=400, detail=f"entry {i+1}: logo must be an image URL or uploaded image")
+        # URL sanity. Accept http(s) and base64 raster data URLs only — SVG and other
+        # data: schemes are rejected because they can carry executable script.
+        if logo_url and not _is_safe_logo_url(logo_url):
+            raise HTTPException(status_code=400, detail=f"entry {i+1}: logo must be a PNG/JPEG/WEBP/GIF URL or uploaded image")
         if link and not (link.startswith("http://") or link.startswith("https://")):
             raise HTTPException(status_code=400, detail=f"entry {i+1}: link must start with http(s)://")
 
@@ -284,7 +310,7 @@ async def _resolve_one_roll(col, roll: dict) -> None:
 
     await asyncio.sleep(GUEST_SPIN_ANIMATION_SECS)
 
-    winner_index = random.randrange(len(entries))
+    winner_index = _secure_random.randrange(len(entries))
     winner_entry = entries[winner_index]
     resolved_at = datetime.now(timezone.utc)
     await col.update_one(
@@ -335,15 +361,16 @@ class GuestApplication(BaseModel):
     contract_address: Optional[str] = None
     notes: Optional[str] = None
     status: str = "pending"          # pending | approved | rejected
+    submitter_ip: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-async def submit_guest_application(col, payload: dict) -> dict:
+async def submit_guest_application(col, payload: dict, *, submitter_ip: Optional[str] = None) -> dict:
     """Public endpoint helper. Validates and stores a new application."""
     name = _clean_str(payload.get("name"), 40)
-    ticker = _clean_str(payload.get("ticker"), 16).upper().lstrip("$")
-    # logo_url accepts http(s) URLs OR base64 data URLs from direct upload.
-    logo_url = _clean_str(payload.get("logo_url"), 400_000) or None
+    ticker = _clean_str(payload.get("ticker"), 16).upper().removeprefix("$")
+    # logo_url accepts http(s) URLs OR base64 raster data URLs from direct upload.
+    logo_url = _clean_str(payload.get("logo_url"), MAX_LOGO_LEN) or None
     community_link = _clean_str(payload.get("community_link"), 500)
     contact = _clean_str(payload.get("contact"), 80)
     contract_address = _clean_str(payload.get("contract_address"), 80) or None
@@ -357,16 +384,23 @@ async def submit_guest_application(col, payload: dict) -> dict:
         raise HTTPException(status_code=400, detail="community link is required")
     if not contact:
         raise HTTPException(status_code=400, detail="contact (X / TG handle) is required")
-    if logo_url and not (logo_url.startswith("http://") or logo_url.startswith("https://") or logo_url.startswith("data:image/")):
-        raise HTTPException(status_code=400, detail="logo must be an image URL or uploaded image")
+    if logo_url and not _is_safe_logo_url(logo_url):
+        raise HTTPException(status_code=400, detail="logo must be a PNG/JPEG/WEBP/GIF URL or uploaded image")
     if not (community_link.startswith("http://") or community_link.startswith("https://")):
         raise HTTPException(status_code=400, detail="community_link must start with http(s)://")
 
+    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+
     # Soft duplicate guard — same ticker submitted within last 24h.
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    existing = await col.find_one({"ticker": ticker, "status": "pending", "created_at": {"$gte": cutoff}})
+    existing = await col.find_one({"ticker": ticker, "status": "pending", "created_at": {"$gte": cutoff_24h}})
     if existing:
         raise HTTPException(status_code=409, detail=f"${ticker} already has a pending application — we'll get back to you")
+
+    # Per-IP daily cap. Defends against spam-volume floods past the slowapi limiter.
+    if submitter_ip:
+        ip_count = await col.count_documents({"submitter_ip": submitter_ip, "created_at": {"$gte": cutoff_24h}})
+        if ip_count >= MAX_APPS_PER_IP_PER_DAY:
+            raise HTTPException(status_code=429, detail="too many applications from this network in the last 24h")
 
     app = GuestApplication(
         name=name,
@@ -376,26 +410,44 @@ async def submit_guest_application(col, payload: dict) -> dict:
         contact=contact,
         contract_address=contract_address,
         notes=notes,
+        submitter_ip=submitter_ip,
     )
     doc = app.model_dump()
     await col.insert_one(doc)
     return _normalize_app_doc(doc)
 
 
-def _normalize_app_doc(doc: Optional[dict]) -> Optional[dict]:
+def _normalize_app_doc(doc: Optional[dict], *, include_logo: bool = True) -> Optional[dict]:
     if not doc:
         return None
     out = {k: v for k, v in doc.items() if k != "_id"}
+    # Never leak the submitter IP outside the backend.
+    out.pop("submitter_ip", None)
     v = out.get("created_at")
     if isinstance(v, datetime):
         out["created_at"] = _ensure_utc(v).isoformat()
+    if not include_logo:
+        # Replace large data URLs with a sentinel so the admin list response stays small.
+        url = out.get("logo_url")
+        if isinstance(url, str) and url.startswith("data:"):
+            out["logo_url"] = None
+            out["logo_inline"] = True
     return out
 
 
 async def list_guest_applications(col, limit: int = 100) -> List[dict]:
+    """Lightweight list for the admin inbox. Inlined data-URL logos are omitted to
+    keep the response tiny; fetch the full doc with /applications/{id} when needed."""
     cur = col.find({}).sort("created_at", -1).limit(limit)
     docs = await cur.to_list(limit)
-    return [_normalize_app_doc(d) for d in docs]
+    return [_normalize_app_doc(d, include_logo=False) for d in docs]
+
+
+async def get_guest_application(col, app_id: str) -> dict:
+    doc = await col.find_one({"id": app_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="application not found")
+    return _normalize_app_doc(doc)
 
 
 async def update_guest_application(col, app_id: str, *, status: str) -> dict:

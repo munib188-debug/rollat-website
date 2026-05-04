@@ -7,7 +7,8 @@ from slowapi.errors import RateLimitExceeded
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
-import random
+import random  # only for deterministic-seeded mock generators below; never for winner selection
+import secrets
 import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -26,8 +27,13 @@ from auth import (
     get_current_wallet,
     get_admin_wallet,
     is_admin_wallet,
+    revoke_jti,
+    verify_jwt,
     ADMIN_WALLETS,
 )
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+_bearer = HTTPBearer(auto_error=False)
 from dev_rolls import (
     create_dev_roll,
     update_dev_roll,
@@ -176,7 +182,32 @@ def _get_col(name: str):
     return _MemCollection(name)
 
 app = FastAPI(title="$ROLLAT API")
-limiter = Limiter(key_func=get_remote_address)
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the real client IP behind a single trusted reverse proxy
+    (Render, Vercel rewrites). Honors the leftmost X-Forwarded-For value.
+    Falls back to the direct peer when no XFF header is present."""
+    xff = request.headers.get("x-forwarded-for") if hasattr(request, "headers") else None
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    return get_remote_address(request)
+
+
+def _ip_plus_address_key(request: Request) -> str:
+    """Composite key for /auth/nonce — limits per (ip, address) pair so flooding
+    one address from many IPs (or many addresses from one IP) is each capped."""
+    addr = ""
+    try:
+        addr = (request.query_params.get("address") or "").strip()[:48]
+    except Exception:
+        pass
+    return f"{_client_ip(request)}|{addr}"
+
+
+limiter = Limiter(key_func=_client_ip)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 api_router = APIRouter(prefix="/api")
@@ -244,16 +275,50 @@ class QualifiedWalletsResponse(BaseModel):
 
 
 # ---------- WebSocket broadcaster ----------
+WS_MAX_CONNECTIONS_TOTAL = 500
+WS_MAX_CONNECTIONS_PER_IP = 8
+
+
 class SpinBroadcaster:
     def __init__(self):
         self.connections: Set[WebSocket] = set()
+        self._per_ip: dict[str, int] = {}
+
+    @staticmethod
+    def _peer_ip(ws: WebSocket) -> str:
+        try:
+            xff = ws.headers.get("x-forwarded-for")
+            if xff:
+                return xff.split(",")[0].strip()
+        except Exception:
+            pass
+        try:
+            return ws.client.host if ws.client else "unknown"
+        except Exception:
+            return "unknown"
 
     async def connect(self, ws: WebSocket):
+        ip = self._peer_ip(ws)
+        if len(self.connections) >= WS_MAX_CONNECTIONS_TOTAL:
+            await ws.close(code=1013)
+            return False
+        if self._per_ip.get(ip, 0) >= WS_MAX_CONNECTIONS_PER_IP:
+            await ws.close(code=1013)
+            return False
         await ws.accept()
         self.connections.add(ws)
+        self._per_ip[ip] = self._per_ip.get(ip, 0) + 1
+        ws.state.peer_ip = ip
+        return True
 
     def disconnect(self, ws: WebSocket):
-        self.connections.discard(ws)
+        if ws in self.connections:
+            self.connections.discard(ws)
+            ip = getattr(ws.state, "peer_ip", None)
+            if ip and ip in self._per_ip:
+                self._per_ip[ip] = max(0, self._per_ip[ip] - 1)
+                if self._per_ip[ip] == 0:
+                    self._per_ip.pop(ip, None)
 
     async def broadcast(self, data: dict):
         dead = set()
@@ -262,7 +327,8 @@ class SpinBroadcaster:
                 await ws.send_json(data)
             except Exception:
                 dead.add(ws)
-        self.connections -= dead
+        for ws in dead:
+            self.disconnect(ws)
 
 
 broadcaster = SpinBroadcaster()
@@ -285,9 +351,12 @@ def tickets_for_holdings(tokens: float) -> int:
     return 6
 
 
+_SECURE_RANDOM = secrets.SystemRandom()
+
+
 def select_weighted_winner(participants: List[dict]) -> dict:
     pool = [p for p in participants for _ in range(p["tickets"])]
-    return random.choice(pool) if pool else participants[0]
+    return _SECURE_RANDOM.choice(pool) if pool else participants[0]
 
 
 # ---------- Mock data ----------
@@ -478,7 +547,7 @@ async def root():
 
 # ---------- Sign-in-with-Solana ----------
 @api_router.get("/auth/nonce", response_model=NonceResponse)
-@limiter.limit("10/minute")
+@limiter.limit("10/minute", key_func=_ip_plus_address_key)
 async def auth_nonce(request: Request, address: str):
     """Issue a one-time nonce + SIWS message for the given wallet address."""
     if nonce_store is None:
@@ -508,6 +577,21 @@ async def auth_verify(request: Request, req: VerifyRequest):
         expires_at=exp.isoformat(),
         is_admin=is_admin_wallet(req.address),
     )
+
+
+@api_router.post("/auth/logout")
+async def auth_logout(creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer)):
+    """Revoke the presented JWT for the remainder of its TTL."""
+    if creds and creds.credentials:
+        try:
+            payload = verify_jwt(creds.credentials)
+            jti = payload.get("jti")
+            exp = payload.get("exp", 0)
+            if jti:
+                revoke_jti(jti, int(exp))
+        except HTTPException:
+            pass  # already invalid/expired — nothing to revoke
+    return {"ok": True}
 
 
 @api_router.get("/auth/me", response_model=MeResponse)
@@ -1028,7 +1112,11 @@ class GuestApplyRequest(BaseModel):
 @limiter.limit("3/minute")
 async def guest_apply(request: Request, req: GuestApplyRequest):
     """Public — projects submit themselves to be in a future Guest Roll."""
-    return await submit_guest_application(_get_col("guest_applications"), req.model_dump())
+    return await submit_guest_application(
+        _get_col("guest_applications"),
+        req.model_dump(),
+        submitter_ip=_client_ip(request),
+    )
 
 
 @api_router.get("/guest/applications")
@@ -1053,11 +1141,15 @@ async def guest_application_delete(app_id: str, admin: str = Depends(get_admin_w
 # ---------- WebSocket ----------
 @app.websocket("/ws/spin")
 async def websocket_spin(websocket: WebSocket):
-    await broadcaster.connect(websocket)
+    accepted = await broadcaster.connect(websocket)
+    if not accepted:
+        return
     try:
         while True:
             await websocket.receive_text()  # Keep alive, ignore incoming
     except WebSocketDisconnect:
+        broadcaster.disconnect(websocket)
+    except Exception:
         broadcaster.disconnect(websocket)
 
 
@@ -1072,7 +1164,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=False,
     allow_origins=[o.strip() for o in os.environ.get('CORS_ORIGINS', DEFAULT_CORS_ORIGINS).split(',') if o.strip()],
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 

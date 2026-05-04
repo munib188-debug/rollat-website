@@ -4,6 +4,7 @@ import { Trophy, ExternalLink, Zap, Clock } from "lucide-react";
 import { useGuestRoll } from "@/lib/useGuestRoll";
 import { useCountdown, pad } from "@/lib/useCountdown";
 import { launchConfetti } from "@/lib/confetti";
+import { safeHref, safeImgSrc } from "@/lib/utils";
 
 const ACCENT = "#A855F7";
 
@@ -298,9 +299,9 @@ function ReelCard({ entry, colorIndex, height, highlight }) {
         boxShadow: highlight ? `0 0 32px ${color}aa, inset 0 0 12px ${color}30` : "none",
       }}
     >
-      {entry?.logo_url ? (
+      {safeImgSrc(entry?.logo_url) ? (
         <img
-          src={entry.logo_url}
+          src={safeImgSrc(entry.logo_url)}
           alt=""
           className="w-14 h-14 rounded-full object-cover"
           style={{ border: `2px solid ${color}` }}
@@ -452,9 +453,9 @@ function ResolvedView({ roll }) {
               Guest Roll Winner
             </div>
             <div className="flex items-center gap-4 mb-4">
-              {winner?.logo_url && (
+              {safeImgSrc(winner?.logo_url) && (
                 <img
-                  src={winner.logo_url}
+                  src={safeImgSrc(winner.logo_url)}
                   alt=""
                   className="w-16 h-16 rounded-full object-cover border-2"
                   style={{ borderColor: ACCENT }}
@@ -479,9 +480,9 @@ function ResolvedView({ roll }) {
 
           <div className="flex flex-col items-start md:items-end gap-3">
             <div className="flex items-center gap-3 flex-wrap">
-              {winner?.link && (
+              {safeHref(winner?.link) && (
                 <a
-                  href={winner.link}
+                  href={safeHref(winner.link)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border text-[11px] uppercase tracking-[0.2em] font-mono"
