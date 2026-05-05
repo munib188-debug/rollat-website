@@ -19,7 +19,7 @@ export default function Tokenomics() {
             Every trade <span className="gold-text">feeds the wheel.</span>
           </h2>
           <p className="text-white/55 text-base md:text-lg leading-relaxed mb-8">
-            A 1% creator fee on every pump.fun trade. The fee routes to the prize
+            Pump.fun creator fees on every trade route straight into the prize
             pot. No vesting cliffs, no team allocations sitting on holders' heads —
             just four transparent flows.
           </p>
@@ -79,9 +79,9 @@ export default function Tokenomics() {
             </ResponsiveContainer>
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center">
-                <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-1">Creator Fee</div>
-                <div className="font-display font-black text-6xl gold-text">1%</div>
-                <div className="text-xs text-white/45 font-mono mt-2">on every buy/sell</div>
+                <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-1">Pot Funded By</div>
+                <div className="font-display font-black text-3xl md:text-4xl gold-text leading-tight">Creator<br/>Fees</div>
+                <div className="text-xs text-white/45 font-mono mt-2">on every buy / sell</div>
               </div>
             </div>
           </div>
