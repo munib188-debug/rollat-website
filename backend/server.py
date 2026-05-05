@@ -408,7 +408,7 @@ snapshot_store: Optional[SnapshotStore] = None
 
 
 async def daily_reminder_loop() -> None:
-    """Background task: sends a 10-minute heads-up before the 00:00 UTC daily spin.
+    """Background task: sends a 10-minute heads-up before the 12:00 UTC daily spin.
     Tracks the last warned spin datetime so it fires exactly once per day."""
     warned_for: Optional[datetime] = None
     logger.info("[daily_reminder] loop started")
@@ -632,8 +632,8 @@ async def snapshots_status():
 
 
 def _next_daily_spin(now: datetime) -> datetime:
-    """Spin cadence is 24h, anchored at 00:00 UTC. Returns the next anchor strictly in the future."""
-    today_anchor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    """Spin cadence is 24h, anchored at 12:00 UTC. Returns the next anchor strictly in the future."""
+    today_anchor = now.replace(hour=12, minute=0, second=0, microsecond=0)
     if now < today_anchor:
         return today_anchor
     return today_anchor + timedelta(days=1)
@@ -870,7 +870,7 @@ async def trigger_spin(admin: str = Depends(get_admin_wallet)):
 
 
 async def daily_spin_loop() -> None:
-    """Background task: auto-triggers the daily spin at 00:00 UTC.
+    """Background task: auto-triggers the daily spin at 12:00 UTC.
     Fires within a 5-minute grace window after the anchor; tracks the last
     anchor it ran for so it never double-fires."""
     ran_for: Optional[datetime] = None
@@ -878,7 +878,7 @@ async def daily_spin_loop() -> None:
     while True:
         try:
             now = datetime.now(timezone.utc)
-            current_anchor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            current_anchor = now.replace(hour=12, minute=0, second=0, microsecond=0)
             seconds_since_anchor = (now - current_anchor).total_seconds()
             if 0 <= seconds_since_anchor <= 300 and ran_for != current_anchor:
                 doc = await _get_col("spin_state").find_one({"_id": "singleton"})
