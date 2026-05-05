@@ -537,6 +537,8 @@ async def on_startup():
     asyncio.create_task(guest_scheduler_loop(_get_col))
     # Background task: 10-min daily spin reminder.
     asyncio.create_task(daily_reminder_loop())
+    # Background task: auto-trigger the daily spin at 00:00 UTC.
+    asyncio.create_task(daily_spin_loop())
 
 
 # ---------- Routes ----------
@@ -784,8 +786,9 @@ async def get_spin_state():
     )
 
 
-@api_router.post("/spin/trigger")
-async def trigger_spin(admin: str = Depends(get_admin_wallet)):
+async def _run_daily_spin_core() -> dict:
+    """Core spin logic shared by the admin trigger and the auto scheduler.
+    Raises HTTPException(409) if a spin is already in progress."""
     doc = await _get_col("spin_state").find_one({"_id": "singleton"})
     if doc and doc.get("phase") == "spinning":
         raise HTTPException(status_code=409, detail="Spin already in progress")
@@ -859,6 +862,44 @@ async def trigger_spin(admin: str = Depends(get_admin_wallet)):
     # Resolve after animation time (10s)
     asyncio.create_task(_resolve_after_delay(participants, round_number, 10))
     return {"status": "spinning", "round": round_number, "participants": len(participants)}
+
+
+@api_router.post("/spin/trigger")
+async def trigger_spin(admin: str = Depends(get_admin_wallet)):
+    return await _run_daily_spin_core()
+
+
+async def daily_spin_loop() -> None:
+    """Background task: auto-triggers the daily spin at 00:00 UTC.
+    Fires within a 5-minute grace window after the anchor; tracks the last
+    anchor it ran for so it never double-fires."""
+    ran_for: Optional[datetime] = None
+    logger.info("[daily_spin] auto-trigger loop started")
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            current_anchor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            seconds_since_anchor = (now - current_anchor).total_seconds()
+            if 0 <= seconds_since_anchor <= 300 and ran_for != current_anchor:
+                doc = await _get_col("spin_state").find_one({"_id": "singleton"})
+                phase = (doc or {}).get("phase", "idle")
+                if phase == "spinning":
+                    logger.info("[daily_spin] anchor reached but spin already in progress — skipping")
+                    ran_for = current_anchor
+                else:
+                    try:
+                        result = await _run_daily_spin_core()
+                        logger.info(f"[daily_spin] auto-triggered at {current_anchor.isoformat()}: {result}")
+                    except HTTPException as e:
+                        logger.warning(f"[daily_spin] auto-trigger rejected: {e.detail}")
+                    except Exception:
+                        logger.exception("[daily_spin] auto-trigger failed")
+                    ran_for = current_anchor
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[daily_spin] tick failed")
+        await asyncio.sleep(30)
 
 
 async def _resolve_after_delay(participants: List[dict], round_number: int, delay: int):
