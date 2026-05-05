@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Wallet, Pen, ShieldAlert, ShieldCheck, Save, ExternalLink, Trophy } from "lucide-react";
+import { ArrowLeft, Wallet, Pen, ShieldAlert, ShieldCheck, Save, ExternalLink, Trophy, Hash } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useAuth } from "@/lib/AuthContext";
@@ -56,6 +56,35 @@ export default function PayoutsAdmin() {
 
   const handleSignIn = async () => {
     try { await signIn(); } catch (err) { toast.error("Sign-in failed", { description: err?.message }); }
+  };
+
+  const renumber = async (round) => {
+    const input = window.prompt(`Renumber round #${round} to which new number?`, String(round));
+    if (input == null) return;
+    const next = parseInt(input.trim(), 10);
+    if (!Number.isFinite(next) || next < 1) {
+      toast.error("Invalid round number");
+      return;
+    }
+    if (next === round) return;
+    try {
+      const r = await api.patch(`/admin/winners/${round}/renumber`, { new_round_number: next });
+      toast.success(`Renumbered #${round} → #${next}`);
+      setWinners((ws) =>
+        ws
+          .map((w) => (w.round_number === round ? r.data : w))
+          .sort((a, b) => b.round_number - a.round_number)
+      );
+      setDrafts((d) => {
+        const copy = { ...d };
+        copy[next] = copy[round] ?? "";
+        delete copy[round];
+        return copy;
+      });
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      toast.error("Renumber failed", { description: detail || err?.message });
+    }
   };
 
   const saveTx = async (round) => {
@@ -216,6 +245,15 @@ export default function PayoutsAdmin() {
                             <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> Solscan
                           </a>
                         )}
+                        <Button
+                          onClick={() => renumber(w.round_number)}
+                          variant="outline"
+                          className="border-white/15 bg-transparent text-white/70 hover:text-white hover:bg-white/5 h-10 px-3 font-mono text-[11px] uppercase tracking-widest rounded-sm"
+                          title="Change this winner's round number"
+                          data-testid={`payout-renumber-${w.round_number}`}
+                        >
+                          <Hash className="w-3.5 h-3.5 mr-1.5" /> Renumber
+                        </Button>
                       </div>
                     </div>
                   </div>

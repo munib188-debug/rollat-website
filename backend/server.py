@@ -230,6 +230,10 @@ class WinnerTxUpdate(BaseModel):
     tx: Optional[str] = None  # null/empty clears the tx
 
 
+class WinnerRenumberRequest(BaseModel):
+    new_round_number: int
+
+
 class Stats(BaseModel):
     current_pot_sol: float
     next_spin_at: str  # ISO
@@ -510,14 +514,14 @@ async def on_startup():
         except Exception:
             logger.exception("seed purge: marker insert failed")
 
-    # Initialize spin_state if missing. round_number=1 is the upcoming first
-    # real spin (clean slate post-purge).
+    # Initialize spin_state if missing. round_number starts at 0 so the first
+    # trigger increments to 1 (trigger_spin reads `round_number + 1`).
     existing = await spin_col.find_one({"_id": "singleton"})
     if not existing:
         await spin_col.insert_one({
             "_id": "singleton",
             "phase": "idle",
-            "round_number": 1,
+            "round_number": 0,
             "winner": None,
             "participants": [],
             "participants_count": 0,
@@ -742,6 +746,49 @@ async def admin_set_winner_tx(
     if isinstance(result.get("won_at"), str):
         result["won_at"] = datetime.fromisoformat(result["won_at"])
     return result
+
+
+@api_router.patch("/admin/winners/{round_number}/renumber", response_model=Winner)
+async def admin_renumber_winner(
+    round_number: int,
+    payload: WinnerRenumberRequest,
+    admin: str = Depends(get_admin_wallet),
+):
+    """Admin renames a winner's round number. Used to fix off-by-one mistakes
+    from earlier deploys. Refuses to overwrite a different existing winner."""
+    new_round = payload.new_round_number
+    if new_round < 1:
+        raise HTTPException(status_code=400, detail="new_round_number must be >= 1")
+    if new_round == round_number:
+        raise HTTPException(status_code=400, detail="new_round_number is the same as the current round")
+
+    winners_col = _get_col("winners")
+    target = await winners_col.find_one({"round_number": round_number})
+    if not target:
+        raise HTTPException(status_code=404, detail=f"No winner with round_number={round_number}")
+
+    collision = await winners_col.find_one({"round_number": new_round})
+    if collision:
+        raise HTTPException(status_code=409, detail=f"Round #{new_round} is already taken by another winner")
+
+    await winners_col.update_one(
+        {"round_number": round_number},
+        {"$set": {"round_number": new_round}},
+    )
+
+    # Keep spin_state's round_number in sync if it was pointing at the old number.
+    spin_col = _get_col("spin_state")
+    spin_doc = await spin_col.find_one({"_id": "singleton"})
+    if spin_doc and spin_doc.get("round_number") == round_number:
+        await spin_col.update_one(
+            {"_id": "singleton"},
+            {"$set": {"round_number": new_round}},
+        )
+
+    updated = await winners_col.find_one({"round_number": new_round}, {"_id": 0})
+    if updated and isinstance(updated.get("won_at"), str):
+        updated["won_at"] = datetime.fromisoformat(updated["won_at"])
+    return updated
 
 
 def _is_valid_solana_address(addr: str) -> bool:
