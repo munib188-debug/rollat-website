@@ -3,6 +3,8 @@ import { Component, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Landing from "@/pages/Landing";
 import { Toaster } from "@/components/ui/sonner";
+import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const DevAdmin = lazy(() => import("@/pages/DevAdmin"));
@@ -58,6 +60,8 @@ function App() {
                 </Suspense>
               </BrowserRouter>
               <Toaster richColors position="top-center" />
+              <Analytics />
+              <SpeedInsights />
             </div>
           </SpinPhaseProvider>
         </AuthProvider>
