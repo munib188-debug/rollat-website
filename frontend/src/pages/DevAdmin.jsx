@@ -157,9 +157,14 @@ export default function DevAdmin() {
           </Link>
           <div className="flex items-center gap-2">
             {isAdmin && (
-              <Link to="/guest" className="hidden md:inline-flex items-center px-3 h-9 border border-white/10 hover:border-white/30 text-white/60 hover:text-white rounded-sm font-mono text-[11px] uppercase tracking-widest">
-                Guest Roll →
-              </Link>
+              <>
+                <Link to="/guest" className="hidden md:inline-flex items-center px-3 h-9 border border-white/10 hover:border-white/30 text-white/60 hover:text-white rounded-sm font-mono text-[11px] uppercase tracking-widest">
+                  Guest Roll →
+                </Link>
+                <Link to="/admin/payouts" className="hidden md:inline-flex items-center px-3 h-9 border border-gold/30 hover:border-gold/60 text-gold/80 hover:text-gold rounded-sm font-mono text-[11px] uppercase tracking-widest">
+                  Payouts →
+                </Link>
+              </>
             )}
             {connectedAddr && (
               <span className="hidden md:inline-flex items-center gap-2 px-3 h-9 border border-white/10 text-white/70 rounded-sm font-mono text-[11px] uppercase tracking-widest">

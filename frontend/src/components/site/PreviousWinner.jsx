@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy } from "lucide-react";
+import { Trophy, ExternalLink } from "lucide-react";
 import { useWinners } from "@/lib/api";
 import { useSpinPhase } from "@/lib/SpinPhaseContext";
 import { launchConfetti } from "@/lib/confetti";
@@ -104,6 +104,18 @@ export default function PreviousWinner() {
               <span className="text-gold font-bold">{fmtSol(winner?.amount_sol)}</span>
               <span className="text-white/30 hidden sm:inline">·</span>
               <span className="text-white/40 text-xs hidden sm:inline">Round #{winner?.round_number}</span>
+              {winner?.payout_tx && (
+                <a
+                  href={`https://solscan.io/tx/${winner.payout_tx}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto inline-flex items-center gap-1 text-white/45 hover:text-gold text-[11px] uppercase tracking-[0.2em] transition-colors"
+                  title="View payout tx on Solscan"
+                  data-testid="previous-winner-tx-link"
+                >
+                  <ExternalLink className="w-3 h-3" /> Tx
+                </a>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

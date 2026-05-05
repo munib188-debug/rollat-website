@@ -8,6 +8,7 @@ const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const DevAdmin = lazy(() => import("@/pages/DevAdmin"));
 const GuestAdmin = lazy(() => import("@/pages/GuestAdmin"));
 const GuestInvite = lazy(() => import("@/pages/GuestInvite"));
+const PayoutsAdmin = lazy(() => import("@/pages/PayoutsAdmin"));
 import { SpinPhaseProvider } from "@/lib/SpinPhaseContext";
 import SolanaWalletProvider from "@/lib/SolanaWalletProvider";
 import { AuthProvider } from "@/lib/AuthContext";
@@ -52,6 +53,7 @@ function App() {
                     <Route path="/dev" element={<DevAdmin />} />
                     <Route path="/guest" element={<GuestAdmin />} />
                     <Route path="/guest-invite" element={<GuestInvite />} />
+                    <Route path="/admin/payouts" element={<PayoutsAdmin />} />
                   </Routes>
                 </Suspense>
               </BrowserRouter>

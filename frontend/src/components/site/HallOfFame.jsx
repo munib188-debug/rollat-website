@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { useWinners } from "@/lib/api";
 import { useSpinPhase } from "@/lib/SpinPhaseContext";
-import { Trophy } from "lucide-react";
+import { Trophy, ExternalLink } from "lucide-react";
 import { SectionLabel } from "./HowItWorks";
 
 const fmtSol = (n) =>
@@ -102,8 +102,21 @@ export default function HallOfFame() {
                 <div className="md:col-span-2 font-mono text-white/70">{w.tickets}×</div>
                 <div className="md:col-span-2 font-mono text-white/50 text-xs hidden md:block">{fmtDate(w.won_at)}</div>
                 <div className="md:col-span-1 font-mono text-white/35 text-xs hidden md:block">{odds}</div>
-                <div className="md:col-span-2 font-mono font-bold text-gold tabular-nums md:text-right">
-                  {fmtSol(w.amount_sol)}
+                <div className="md:col-span-2 font-mono font-bold text-gold tabular-nums md:text-right flex items-center gap-2 md:justify-end">
+                  <span>{fmtSol(w.amount_sol)}</span>
+                  {w.payout_tx && (
+                    <a
+                      href={`https://solscan.io/tx/${w.payout_tx}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="View payout tx on Solscan"
+                      className="inline-flex items-center text-white/40 hover:text-gold transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                      data-testid={`winner-tx-${w.round_number}`}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                 </div>
               </motion.div>
             );

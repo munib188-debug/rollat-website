@@ -223,6 +223,11 @@ class Winner(BaseModel):
     tickets: int
     participants_count: int = 0
     won_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    payout_tx: Optional[str] = None
+
+
+class WinnerTxUpdate(BaseModel):
+    tx: Optional[str] = None  # null/empty clears the tx
 
 
 class Stats(BaseModel):
@@ -693,6 +698,50 @@ async def get_winners(limit: int = 20):
         if isinstance(w.get("won_at"), str):
             w["won_at"] = datetime.fromisoformat(w["won_at"])
     return winners
+
+
+def _is_valid_solana_tx_signature(sig: str) -> bool:
+    """Solana tx signatures are 64-byte ed25519 signatures, base58-encoded
+    (typically 87-88 chars, sometimes a hair shorter)."""
+    if not isinstance(sig, str):
+        return False
+    s = sig.strip()
+    if not (40 <= len(s) <= 100):
+        return False
+    try:
+        import base58 as _b58
+        raw = _b58.b58decode(s)
+        return len(raw) == 64
+    except Exception:
+        return False
+
+
+@api_router.patch("/admin/winners/{round_number}/tx", response_model=Winner)
+async def admin_set_winner_tx(
+    round_number: int,
+    payload: WinnerTxUpdate,
+    admin: str = Depends(get_admin_wallet),
+):
+    """Admin sets (or clears) the payout transaction signature for a past
+    spin's winner. The signature is shown publicly as a Solscan link."""
+    tx_value: Optional[str] = None
+    if payload.tx is not None and payload.tx.strip():
+        candidate = payload.tx.strip()
+        if not _is_valid_solana_tx_signature(candidate):
+            raise HTTPException(status_code=400, detail="Invalid Solana transaction signature")
+        tx_value = candidate
+
+    result = await _get_col("winners").find_one_and_update(
+        {"round_number": round_number},
+        {"$set": {"payout_tx": tx_value}},
+        return_document=True,
+        projection={"_id": 0},
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Winner not found")
+    if isinstance(result.get("won_at"), str):
+        result["won_at"] = datetime.fromisoformat(result["won_at"])
+    return result
 
 
 def _is_valid_solana_address(addr: str) -> bool:
