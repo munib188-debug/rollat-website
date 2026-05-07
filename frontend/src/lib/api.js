@@ -38,19 +38,44 @@ api.interceptors.response.use(
   }
 );
 
+// Seconds-from-now to the next 12:00 UTC anchor (positive number, can be very large).
+// Mirrors backend `_next_daily_spin`. Used to speed up polling near the daily spin moment.
+function secondsToNextAnchor() {
+  const now = new Date();
+  const anchor = new Date(now);
+  anchor.setUTCHours(12, 0, 0, 0);
+  if (now >= anchor) anchor.setUTCDate(anchor.getUTCDate() + 1);
+  return Math.max(0, (anchor.getTime() - now.getTime()) / 1000);
+}
+
+// True within ±60s of 12:00 UTC. During this window we tighten polling so the
+// idle → spinning transition is observed within ~1s instead of up to 5–15s.
+function isNearAnchor() {
+  const s = secondsToNextAnchor();
+  // s near 86340 means we just passed the anchor (within last 60s).
+  return s <= 60 || s >= 86340;
+}
+
 export function useStats() {
   const [stats, setStats] = useState(null);
   useEffect(() => {
     let mounted = true;
-    api.get("/stats").then((r) => {
-      if (mounted) setStats(r.data);
-    }).catch(() => {});
-    const id = setInterval(() => {
+    const fetchOnce = () => {
       api.get("/stats").then((r) => {
         if (mounted) setStats(r.data);
       }).catch(() => {});
-    }, 15000);
-    return () => { mounted = false; clearInterval(id); };
+    };
+    fetchOnce();
+    let timer;
+    const schedule = () => {
+      const interval = isNearAnchor() ? 3000 : 15000;
+      timer = setTimeout(() => {
+        fetchOnce();
+        if (mounted) schedule();
+      }, interval);
+    };
+    schedule();
+    return () => { mounted = false; clearTimeout(timer); };
   }, []);
   return stats;
 }
@@ -72,7 +97,8 @@ export function useSpinState() {
   useEffect(() => {
     mountedRef.current = true;
 
-    const poll = (interval = 5000) => {
+    const idleInterval = () => (isNearAnchor() ? 1000 : 5000);
+    const poll = (interval = idleInterval()) => {
       pollRef.current = setTimeout(async () => {
         try {
           const r = await api.get("/spin/state");
@@ -82,7 +108,7 @@ export function useSpinState() {
           }
         } catch (_) {}
         if (mountedRef.current) {
-          poll(phaseRef.current === "spinning" ? 1000 : 5000);
+          poll(phaseRef.current === "spinning" ? 1000 : idleInterval());
         }
       }, interval);
     };

@@ -88,23 +88,35 @@ function IdleDisplay({ t, stats }) {
       {/* Left: countdown + info */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-4">
-          Next Spin In
+          {t.firing ? "Spin Starting" : "Next Spin In"}
         </div>
-        <div className="flex items-end gap-3 font-mono mb-8">
-          {[
-            { label: "HRS", v: t.h },
-            { label: "MIN", v: t.m },
-            { label: "SEC", v: t.s },
-          ].map((c, i) => (
-            <div key={c.label} className="flex items-end gap-3">
-              <div className="text-center">
-                <div className="text-[10px] tracking-[0.25em] text-white/35 mb-1">{c.label}</div>
-                <div className="text-5xl sm:text-6xl font-black gold-text tabular-nums">{pad(c.v)}</div>
+        {t.firing ? (
+          <div className="mb-8">
+            <motion.div
+              className="font-display font-black gold-text text-5xl sm:text-6xl tracking-tighter"
+              animate={{ opacity: [0.55, 1, 0.55] }}
+              transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+            >
+              Starting…
+            </motion.div>
+          </div>
+        ) : (
+          <div className="flex items-end gap-3 font-mono mb-8">
+            {[
+              { label: "HRS", v: t.h },
+              { label: "MIN", v: t.m },
+              { label: "SEC", v: t.s },
+            ].map((c, i) => (
+              <div key={c.label} className="flex items-end gap-3">
+                <div className="text-center">
+                  <div className="text-[10px] tracking-[0.25em] text-white/35 mb-1">{c.label}</div>
+                  <div className="text-5xl sm:text-6xl font-black gold-text tabular-nums">{pad(c.v)}</div>
+                </div>
+                {i < 2 && <span className="text-4xl text-white/20 pb-1">:</span>}
               </div>
-              {i < 2 && <span className="text-4xl text-white/20 pb-1">:</span>}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-x-8 gap-y-2 font-mono text-sm text-white/50">
           <div><span className="text-white">{stats?.total_qualified_wallets ?? "—"}</span> wallets qualified</div>

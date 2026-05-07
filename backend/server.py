@@ -995,7 +995,7 @@ async def daily_spin_loop() -> None:
             raise
         except Exception:
             logger.exception("[daily_spin] tick failed")
-        await asyncio.sleep(30)
+        await asyncio.sleep(2)
 
 
 async def _resolve_after_delay(participants: List[dict], round_number: int, delay: int):
