@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Users, Search, LayoutGrid, List } from "lucide-react";
+import { Users, Search, LayoutGrid, List, Flame } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useQualifiedWallets } from "@/lib/api";
 import { SectionLabel } from "./HowItWorks";
@@ -102,6 +102,8 @@ export default function QualifiedWallets() {
           </div>
         </div>
 
+        <LongTermHolderBanner />
+
         {loading ? (
           <div className="flex items-center justify-center py-20 text-white/30 font-mono text-sm">Loading wallets...</div>
         ) : qualificationActive === false ? (
@@ -136,6 +138,39 @@ export default function QualifiedWallets() {
         )}
       </div>
     </section>
+  );
+}
+
+function LongTermHolderBanner() {
+  return (
+    <div
+      className="mb-8 border border-gold/25 bg-gradient-to-r from-gold/[0.06] to-transparent rounded-sm p-5 md:p-6 flex flex-col md:flex-row md:items-center gap-4"
+      data-testid="long-term-holder-banner"
+    >
+      <div className="flex items-center gap-3 md:flex-shrink-0">
+        <div className="w-10 h-10 rounded-sm bg-gold/15 flex items-center justify-center">
+          <Flame className="w-5 h-5 text-gold" />
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold">
+            Long-term Holder Bonus
+          </div>
+          <div className="font-display font-bold text-lg tracking-tight">
+            Hold longer, win more.
+          </div>
+        </div>
+      </div>
+      <p className="text-white/60 text-sm md:text-[13px] leading-relaxed md:flex-1">
+        On top of base tickets, every qualified wallet earns <span className="text-gold font-semibold">+1 ticket at 7 consecutive days</span>,
+        then <span className="text-gold font-semibold">+1 every 30 days after</span>. One missed snapshot is forgiven; two breaks the streak.
+      </p>
+      <div className="hidden md:flex flex-col items-end gap-1 font-mono text-[10px] uppercase tracking-widest text-white/40">
+        <div>7d → +1</div>
+        <div>30d → +2</div>
+        <div>60d → +3</div>
+        <div className="text-white/25">…</div>
+      </div>
+    </div>
   );
 }
 
