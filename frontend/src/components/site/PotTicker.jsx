@@ -7,10 +7,24 @@ const fmtSol = (n) =>
 
 export default function PotTicker() {
   const { stats, spinState } = useSpinPhase() || {};
-  const phase = spinState?.phase || "idle";
+  const rawPhase = spinState?.phase || "idle";
+  const potBelowPrize =
+    rawPhase === "idle" &&
+    stats?.fixed_prize_sol != null &&
+    stats?.current_pot_sol != null &&
+    stats.current_pot_sol < stats.fixed_prize_sol;
+  const phase = potBelowPrize ? "awaiting_funds" : rawPhase;
 
-  const phaseLabel = phase === "spinning" ? "SPINNING" : phase === "resolved" ? "WINNER" : "IDLE";
-  const phaseAccent = phase === "spinning" ? "crimson" : phase === "resolved" ? "gold" : "emerald";
+  const phaseLabel =
+    phase === "spinning" ? "SPINNING" :
+    phase === "resolved" ? "WINNER" :
+    phase === "awaiting_funds" ? "AWAITING FUNDS" :
+    "IDLE";
+  const phaseAccent =
+    phase === "spinning" ? "crimson" :
+    phase === "resolved" ? "gold" :
+    phase === "awaiting_funds" ? "crimson" :
+    "emerald";
 
   const items = [
     { icon: Coins, label: "Live Pot", value: fmtSol(stats?.current_pot_sol), accent: "gold", testid: "pot-live" },
