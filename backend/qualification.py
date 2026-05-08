@@ -49,9 +49,22 @@ def has_sufficient_history(snapshots: list) -> bool:
     return len(snapshots) >= REQUIRED_SNAPSHOTS
 
 
-def compute_qualified_wallets(snapshots: list) -> list[dict]:
+def compute_qualified_wallets(
+    snapshots: list,
+    *,
+    min_tokens: Optional[int] = None,
+    excluded: Optional[frozenset[str]] = None,
+) -> list[dict]:
     """Returns [{wallet, tickets, min_balance}] sorted by tickets desc.
-    Empty list when we have fewer than REQUIRED_SNAPSHOTS snapshots."""
+    Empty list when we have fewer than REQUIRED_SNAPSHOTS snapshots.
+
+    Optional overrides:
+      min_tokens: defaults to MIN_QUALIFYING_TOKENS
+      excluded:   defaults to EXCLUDED_WALLETS
+    """
+    min_tok = MIN_QUALIFYING_TOKENS if min_tokens is None else int(min_tokens)
+    excl = EXCLUDED_WALLETS if excluded is None else excluded
+
     if not has_sufficient_history(snapshots):
         return []
 
@@ -60,7 +73,7 @@ def compute_qualified_wallets(snapshots: list) -> list[dict]:
 
     # Only wallets present in the most-recent snapshot can possibly qualify.
     # Strip any permanently-excluded addresses (LP, team, etc.).
-    candidates = [w for w in balance_per_snap[0].keys() if w not in EXCLUDED_WALLETS]
+    candidates = [w for w in balance_per_snap[0].keys() if w not in excl]
 
     qualified: list[dict] = []
     for wallet in candidates:
@@ -68,7 +81,7 @@ def compute_qualified_wallets(snapshots: list) -> list[dict]:
         ok = True
         for bal in balance_per_snap:
             amt = bal.get(wallet, 0)
-            if amt < MIN_QUALIFYING_TOKENS:
+            if amt < min_tok:
                 ok = False
                 break
             amounts.append(amt)
@@ -84,7 +97,13 @@ def compute_qualified_wallets(snapshots: list) -> list[dict]:
     return qualified
 
 
-def compute_wallet_status(snapshots: list, wallet: str) -> dict:
+def compute_wallet_status(
+    snapshots: list,
+    wallet: str,
+    *,
+    min_tokens: Optional[int] = None,
+    excluded: Optional[frozenset[str]] = None,
+) -> dict:
     """Per-wallet qualification status.
 
     Returns:
@@ -98,6 +117,9 @@ def compute_wallet_status(snapshots: list, wallet: str) -> dict:
                      (only > 0 when fully qualified).
       min_balance  : min token balance across the qualifying window.
     """
+    min_tok = MIN_QUALIFYING_TOKENS if min_tokens is None else int(min_tokens)
+    excl = EXCLUDED_WALLETS if excluded is None else excluded
+
     bal_lookup = [_balance_lookup(s) for s in snapshots[:REQUIRED_SNAPSHOTS]]
     n = len(bal_lookup)
 
@@ -105,7 +127,7 @@ def compute_wallet_status(snapshots: list, wallet: str) -> dict:
     for i in range(REQUIRED_SNAPSHOTS):
         if i < n:
             amt = bal_lookup[i].get(wallet, 0)
-            bools.append(amt >= MIN_QUALIFYING_TOKENS)
+            bools.append(amt >= min_tok)
         else:
             bools.append(False)
 
@@ -116,7 +138,11 @@ def compute_wallet_status(snapshots: list, wallet: str) -> dict:
         else:
             break
 
-    is_qualified = (hours_held == REQUIRED_SNAPSHOTS) and has_sufficient_history(snapshots)
+    is_qualified = (
+        (hours_held == REQUIRED_SNAPSHOTS)
+        and has_sufficient_history(snapshots)
+        and (wallet not in excl)
+    )
 
     if is_qualified:
         amounts = [bl.get(wallet, 0) for bl in bal_lookup[:REQUIRED_SNAPSHOTS]]

@@ -62,6 +62,38 @@ class SnapshotStore:
         logger.info(f"snapshot captured: {len(holders)} holders @ {doc['captured_at'].isoformat()}")
         return doc
 
+    async def list_recent(self, limit: int = 48) -> list[dict]:
+        """List recent snapshots (compact: id + captured_at + total_holders, no holders[])."""
+        try:
+            cursor = self.coll.find(
+                {},
+                projection={"_id": 1, "captured_at": 1, "total_holders": 1, "mint": 1},
+            ).sort("captured_at", -1).limit(int(limit))
+            docs = await cursor.to_list(int(limit))
+            for d in docs:
+                d["id"] = str(d.pop("_id"))
+                ts = d.get("captured_at")
+                if isinstance(ts, datetime):
+                    d["captured_at"] = ts.replace(tzinfo=timezone.utc).isoformat() if ts.tzinfo is None else ts.isoformat()
+            return docs
+        except Exception:
+            logger.exception("list_recent failed")
+            return []
+
+    async def delete_snapshot(self, snapshot_id: str) -> bool:
+        """Delete one snapshot by its string ObjectId. Returns True iff a doc was removed."""
+        try:
+            from bson import ObjectId
+            oid = ObjectId(snapshot_id)
+        except Exception:
+            return False
+        try:
+            res = await self.coll.delete_one({"_id": oid})
+            return bool(getattr(res, "deleted_count", 0))
+        except Exception:
+            logger.exception("delete_snapshot failed")
+            return False
+
     def start_loop(self) -> None:
         if self._task is not None and not self._task.done():
             return

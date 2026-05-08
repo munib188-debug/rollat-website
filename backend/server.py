@@ -76,6 +76,7 @@ from qualification import (
     has_sufficient_history,
     REQUIRED_SNAPSHOTS,
     EXCLUDED_WALLETS,
+    MIN_QUALIFYING_TOKENS,
 )
 
 
@@ -412,6 +413,64 @@ POT_THRESHOLD_SOL = 1.0  # minimum pot required to run a real spin
 # pot, gated by POT_THRESHOLD_SOL" behavior.
 FIXED_DAILY_PRIZE_SOL: Optional[float] = 0.1
 
+# ── Runtime config (Mongo-backed, hot-reloadable) ──────────────────────────
+# Operator-tweakable knobs live in the `runtime_config` singleton doc and are
+# merged on top of the code defaults above. The cache below avoids per-request
+# DB round-trips. PATCHing /api/admin/config invalidates it immediately.
+_RUNTIME_CFG_TTL_SECONDS = 30.0
+_runtime_cfg_cache: dict = {"data": None, "loaded_at": 0.0}
+
+
+def _runtime_defaults() -> dict:
+    return {
+        "fixed_daily_prize_sol": float(FIXED_DAILY_PRIZE_SOL) if FIXED_DAILY_PRIZE_SOL is not None else None,
+        "pot_threshold_sol": float(POT_THRESHOLD_SOL),
+        "min_qualifying_tokens": int(MIN_QUALIFYING_TOKENS),
+        "excluded_wallets": sorted(EXCLUDED_WALLETS),
+    }
+
+
+async def get_runtime_config(force_refresh: bool = False) -> dict:
+    """Return the current runtime config (defaults merged with DB overrides).
+    Falls back to defaults on any DB error so the spin never gets bricked by Mongo issues."""
+    import time
+    now = time.monotonic()
+    cached = _runtime_cfg_cache.get("data")
+    if (
+        not force_refresh
+        and cached is not None
+        and (now - _runtime_cfg_cache.get("loaded_at", 0.0)) < _RUNTIME_CFG_TTL_SECONDS
+    ):
+        return cached
+
+    cfg = _runtime_defaults()
+    try:
+        doc = await _get_col("runtime_config").find_one({"_id": "singleton"})
+    except Exception:
+        doc = None
+    if doc:
+        if "fixed_daily_prize_sol" in doc:
+            v = doc["fixed_daily_prize_sol"]
+            cfg["fixed_daily_prize_sol"] = float(v) if v is not None else None
+        if "pot_threshold_sol" in doc and doc["pot_threshold_sol"] is not None:
+            cfg["pot_threshold_sol"] = float(doc["pot_threshold_sol"])
+        if "min_qualifying_tokens" in doc and doc["min_qualifying_tokens"] is not None:
+            cfg["min_qualifying_tokens"] = int(doc["min_qualifying_tokens"])
+        if "excluded_wallets" in doc and isinstance(doc["excluded_wallets"], list):
+            cfg["excluded_wallets"] = [str(w) for w in doc["excluded_wallets"]]
+        cfg["updated_at"] = doc.get("updated_at")
+        cfg["updated_by"] = doc.get("updated_by")
+
+    _runtime_cfg_cache["data"] = cfg
+    _runtime_cfg_cache["loaded_at"] = now
+    return cfg
+
+
+def _invalidate_runtime_cfg_cache() -> None:
+    _runtime_cfg_cache["data"] = None
+    _runtime_cfg_cache["loaded_at"] = 0.0
+
+
 nonce_store: Optional[NonceStore] = None
 snapshot_store: Optional[SnapshotStore] = None
 
@@ -665,6 +724,8 @@ async def get_stats():
 
     # Pull live on-chain numbers + snapshot history in parallel. All inputs
     # are cached or indexed so /stats stays fast under polling.
+    cfg = await get_runtime_config()
+    excl = frozenset(cfg.get("excluded_wallets") or [])
     market, holders, recent_snaps, pot_sol = await asyncio.gather(
         fetch_token_market_data(),
         fetch_holders_count(),
@@ -673,7 +734,14 @@ async def get_stats():
     )
 
     # Strict qualification: only count wallets when ≥24 snapshots exist.
-    qualified_count = len(compute_qualified_wallets(recent_snaps)) if has_sufficient_history(recent_snaps) else 0
+    qualified_count = (
+        len(compute_qualified_wallets(
+            recent_snaps,
+            min_tokens=cfg.get("min_qualifying_tokens"),
+            excluded=excl,
+        ))
+        if has_sufficient_history(recent_snaps) else 0
+    )
 
     return Stats(
         current_pot_sol=round(float(pot_sol or 0), 4),
@@ -684,8 +752,8 @@ async def get_stats():
         spins_completed=spins,
         rollover_active=rollover_count > 0,
         rollover_count=rollover_count,
-        pot_threshold_sol=POT_THRESHOLD_SOL,
-        fixed_prize_sol=FIXED_DAILY_PRIZE_SOL,
+        pot_threshold_sol=float(cfg.get("pot_threshold_sol", POT_THRESHOLD_SOL)),
+        fixed_prize_sol=cfg.get("fixed_daily_prize_sol"),
         token_price_usd=float(market.get("price_usd") or 0),
         market_cap_usd=float(market.get("market_cap_usd") or 0),
         holders=int(holders or 0),
@@ -791,6 +859,121 @@ async def admin_renumber_winner(
     return updated
 
 
+# ── Admin: runtime config + snapshot management ───────────────────────────
+
+@api_router.get("/admin/config")
+async def admin_get_config(admin: str = Depends(get_admin_wallet)):
+    cfg = await get_runtime_config(force_refresh=True)
+    return {
+        "current": cfg,
+        "defaults": _runtime_defaults(),
+    }
+
+
+@api_router.patch("/admin/config")
+async def admin_patch_config(payload: dict, admin: str = Depends(get_admin_wallet)):
+    update: dict = {}
+
+    if "fixed_daily_prize_sol" in payload:
+        v = payload["fixed_daily_prize_sol"]
+        if v is None:
+            update["fixed_daily_prize_sol"] = None
+        else:
+            try:
+                f = float(v)
+                if f < 0:
+                    raise ValueError
+                update["fixed_daily_prize_sol"] = f
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="fixed_daily_prize_sol must be a non-negative number or null")
+
+    if "pot_threshold_sol" in payload:
+        try:
+            f = float(payload["pot_threshold_sol"])
+            if f < 0:
+                raise ValueError
+            update["pot_threshold_sol"] = f
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="pot_threshold_sol must be a non-negative number")
+
+    if "min_qualifying_tokens" in payload:
+        try:
+            n = int(payload["min_qualifying_tokens"])
+            if n < 0:
+                raise ValueError
+            update["min_qualifying_tokens"] = n
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="min_qualifying_tokens must be a non-negative integer")
+
+    if "excluded_wallets" in payload:
+        raw = payload["excluded_wallets"]
+        if not isinstance(raw, list):
+            raise HTTPException(status_code=400, detail="excluded_wallets must be a list of strings")
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for w in raw:
+            if not isinstance(w, str):
+                raise HTTPException(status_code=400, detail="excluded_wallets entries must be strings")
+            ww = w.strip()
+            if not ww or ww in seen:
+                continue
+            if not _is_valid_solana_address(ww):
+                raise HTTPException(status_code=400, detail=f"Invalid Solana address: {ww}")
+            seen.add(ww)
+            cleaned.append(ww)
+        if len(cleaned) > 500:
+            raise HTTPException(status_code=400, detail="excluded_wallets cannot exceed 500 entries")
+        update["excluded_wallets"] = cleaned
+
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update["updated_by"] = admin
+
+    await _get_col("runtime_config").update_one(
+        {"_id": "singleton"},
+        {"$set": update},
+        upsert=True,
+    )
+    _invalidate_runtime_cfg_cache()
+
+    cfg = await get_runtime_config(force_refresh=True)
+    return {"current": cfg, "defaults": _runtime_defaults()}
+
+
+@api_router.get("/admin/snapshots")
+async def admin_list_snapshots(limit: int = 48, admin: str = Depends(get_admin_wallet)):
+    if snapshot_store is None:
+        raise HTTPException(status_code=503, detail="Snapshot store not initialized")
+    limit = max(1, min(int(limit), 200))
+    return await snapshot_store.list_recent(limit=limit)
+
+
+@api_router.delete("/admin/snapshots/{snapshot_id}")
+async def admin_delete_snapshot(snapshot_id: str, admin: str = Depends(get_admin_wallet)):
+    if snapshot_store is None:
+        raise HTTPException(status_code=503, detail="Snapshot store not initialized")
+    ok = await snapshot_store.delete_snapshot(snapshot_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    return {"deleted": True, "id": snapshot_id}
+
+
+@api_router.post("/admin/snapshots/capture")
+async def admin_capture_snapshot(admin: str = Depends(get_admin_wallet)):
+    if snapshot_store is None:
+        raise HTTPException(status_code=503, detail="Snapshot store not initialized")
+    doc = await snapshot_store.capture()
+    if doc is None:
+        raise HTTPException(status_code=502, detail="Snapshot capture failed (see server logs)")
+    return {
+        "captured_at": doc["captured_at"].isoformat(),
+        "total_holders": doc["total_holders"],
+        "mint": doc.get("mint"),
+    }
+
+
 def _is_valid_solana_address(addr: str) -> bool:
     try:
         import base58 as _b58
@@ -807,11 +990,18 @@ async def _wallet_check_core(wallet: str) -> "WalletStatus":
     # Live current balance from RPC (what the user holds right now) + snapshot
     # history (what determines qualification). The two can disagree briefly
     # right after a buy/sell since snapshots are hourly.
+    cfg = await get_runtime_config()
+    excl = frozenset(cfg.get("excluded_wallets") or [])
     holdings, recent_snaps = await asyncio.gather(
         fetch_wallet_balance(wallet),
         fetch_recent_snapshots(_get_col("holder_snapshots")),
     )
-    status = compute_wallet_status(recent_snaps, wallet)
+    status = compute_wallet_status(
+        recent_snaps,
+        wallet,
+        min_tokens=cfg.get("min_qualifying_tokens"),
+        excluded=excl,
+    )
 
     # Recent-winner lockout (last spin's winner can't qualify next round).
     last_winner_doc = await _get_col("winners").find_one(
@@ -819,7 +1009,7 @@ async def _wallet_check_core(wallet: str) -> "WalletStatus":
     )
     is_recent_winner = bool(last_winner_doc and last_winner_doc.get("wallet") == wallet)
 
-    is_qualified = status["is_qualified"] and not is_recent_winner and wallet not in EXCLUDED_WALLETS
+    is_qualified = status["is_qualified"] and not is_recent_winner and wallet not in excl
     next_in = None if is_qualified else max(1, REQUIRED_SNAPSHOTS - status["hours_held"])
 
     return WalletStatus(
@@ -891,10 +1081,13 @@ async def _run_daily_spin_core() -> dict:
 
     # Rollover check: if pot hasn't hit the threshold, skip the spin and announce.
     # In fixed-prize mode this gate is bypassed entirely — the spin always runs
-    # and the winner gets FIXED_DAILY_PRIZE_SOL regardless of pot balance.
+    # and the winner gets fixed_daily_prize_sol regardless of pot balance.
+    cfg = await get_runtime_config()
+    fixed_prize = cfg.get("fixed_daily_prize_sol")
+    pot_threshold = float(cfg.get("pot_threshold_sol", POT_THRESHOLD_SOL))
     pot_check = await fetch_pot_balance()
     pot_check_sol = round(float(pot_check or 0), 4)
-    prize_required = float(FIXED_DAILY_PRIZE_SOL) if FIXED_DAILY_PRIZE_SOL is not None else POT_THRESHOLD_SOL
+    prize_required = float(fixed_prize) if fixed_prize is not None else pot_threshold
     if pot_check_sol < prize_required:
         rollover_count = (doc.get("rollover_count", 0) + 1) if doc else 1
         await _get_col("spin_state").update_one(
@@ -916,8 +1109,13 @@ async def _run_daily_spin_core() -> dict:
         }
 
     recent_snaps = await fetch_recent_snapshots(_get_col("holder_snapshots"))
+    excl = frozenset(cfg.get("excluded_wallets") or [])
     if has_sufficient_history(recent_snaps):
-        participants = compute_qualified_wallets(recent_snaps)
+        participants = compute_qualified_wallets(
+            recent_snaps,
+            min_tokens=cfg.get("min_qualifying_tokens"),
+            excluded=excl,
+        )
     else:
         participants = generate_mock_qualified_wallets(50)
 
@@ -946,8 +1144,8 @@ async def _run_daily_spin_core() -> dict:
 
     pot_sol_now = await fetch_pot_balance()
     announced_prize = (
-        float(FIXED_DAILY_PRIZE_SOL)
-        if FIXED_DAILY_PRIZE_SOL is not None
+        float(fixed_prize)
+        if fixed_prize is not None
         else round(float(pot_sol_now or 0), 4)
     )
     asyncio.create_task(announce_daily_spin_started(
@@ -1003,8 +1201,10 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
     await asyncio.sleep(delay)
     winner_entry = select_weighted_winner(participants)
     pot_sol = await fetch_pot_balance()
-    if FIXED_DAILY_PRIZE_SOL is not None:
-        amount_sol = float(FIXED_DAILY_PRIZE_SOL)
+    cfg = await get_runtime_config()
+    fixed_prize = cfg.get("fixed_daily_prize_sol")
+    if fixed_prize is not None:
+        amount_sol = float(fixed_prize)
     else:
         amount_sol = round(float(pot_sol or 0), 4)
     now = datetime.now(timezone.utc)
@@ -1068,11 +1268,17 @@ async def get_qualified_wallets(page: int = 1, per_page: int = 50, search: str =
     page = max(1, page)
     per_page = max(1, min(per_page, 100))
     search = search[:50]  # prevent absurdly long search strings
+    cfg = await get_runtime_config()
+    excl = frozenset(cfg.get("excluded_wallets") or [])
     recent_snaps = await fetch_recent_snapshots(_get_col("holder_snapshots"))
     snapshots_captured = min(len(recent_snaps), REQUIRED_SNAPSHOTS)
     qualification_active = has_sufficient_history(recent_snaps)
 
-    all_wallets = compute_qualified_wallets(recent_snaps) if qualification_active else []
+    all_wallets = compute_qualified_wallets(
+        recent_snaps,
+        min_tokens=cfg.get("min_qualifying_tokens"),
+        excluded=excl,
+    ) if qualification_active else []
 
     if search:
         s = search.lower()

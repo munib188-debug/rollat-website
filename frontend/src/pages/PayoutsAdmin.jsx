@@ -117,6 +117,12 @@ export default function PayoutsAdmin() {
               PAYOUTS · ADMIN
             </span>
           </Link>
+          <div className="hidden md:flex items-center gap-1 mr-2">
+            <Link to="/admin/system" className="px-3 h-9 inline-flex items-center font-mono text-[11px] uppercase tracking-widest rounded-sm text-white/50 hover:text-white border border-transparent hover:border-white/10 transition-colors">System</Link>
+            <Link to="/admin/payouts" className="px-3 h-9 inline-flex items-center font-mono text-[11px] uppercase tracking-widest rounded-sm text-gold border border-gold/40">Payouts</Link>
+            <Link to="/dev" className="px-3 h-9 inline-flex items-center font-mono text-[11px] uppercase tracking-widest rounded-sm text-white/50 hover:text-white border border-transparent hover:border-white/10 transition-colors">Dev</Link>
+            <Link to="/guest" className="px-3 h-9 inline-flex items-center font-mono text-[11px] uppercase tracking-widest rounded-sm text-white/50 hover:text-white border border-transparent hover:border-white/10 transition-colors">Guest</Link>
+          </div>
           <div className="flex items-center gap-2">
             {connectedAddr && (
               <span className="hidden md:inline-flex items-center gap-2 px-3 h-9 border border-white/10 text-white/70 rounded-sm font-mono text-[11px] uppercase tracking-widest">

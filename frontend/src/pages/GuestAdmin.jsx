@@ -217,8 +217,14 @@ export default function GuestAdmin() {
           <ArrowLeft className="w-4 h-4" /> Home
         </Link>
         <div className="flex items-center gap-3">
+          <Link to="/admin/system" className="text-[10px] uppercase tracking-[0.25em] font-mono text-white/45 hover:text-white">
+            System →
+          </Link>
           <Link to="/dev" className="text-[10px] uppercase tracking-[0.25em] font-mono text-white/45 hover:text-white">
             Dev Roll →
+          </Link>
+          <Link to="/admin/payouts" className="text-[10px] uppercase tracking-[0.25em] font-mono text-white/45 hover:text-white">
+            Payouts →
           </Link>
           <ShieldCheck className="w-4 h-4" style={{ color: ACCENT }} />
           <span className="font-mono text-xs" style={{ color: ACCENT }}>ADMIN</span>
