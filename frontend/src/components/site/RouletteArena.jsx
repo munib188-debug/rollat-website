@@ -97,8 +97,9 @@ function IdleDisplay({ t, stats, awaitingFunds }) {
       {/* Left: countdown + info */}
       <div>
         {awaitingFunds && (
-          <div className="mb-6 px-4 py-3 rounded-sm border border-white/10 bg-white/[0.03] font-mono text-xs text-white/50 uppercase tracking-widest">
-            ⚠ Pot below 0.1 SOL — spin skipped until funds are topped up.
+          <div className="mb-6 px-5 py-4 rounded-sm border-2 font-mono text-sm font-bold uppercase tracking-widest"
+            style={{ borderColor: "#FF3366", backgroundColor: "#FF336615", color: "#FF3366" }}>
+            ⚠ Pot below 0.1 SOL — today's spin skipped. Top up the wallet to resume.
           </div>
         )}
         <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-4">
