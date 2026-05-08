@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   ArrowLeft, Wallet, Pen, ShieldAlert, ShieldCheck, Save,
-  Settings, UserX, Camera, Trash2, Plus, RefreshCw,
+  Settings, UserX, Camera, Trash2, Plus, RefreshCw, Flame,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -234,6 +234,11 @@ function ConfigSection() {
         fixed_daily_prize_sol: r.data.current.fixed_daily_prize_sol ?? "",
         pot_threshold_sol: r.data.current.pot_threshold_sol ?? "",
         min_qualifying_tokens: r.data.current.min_qualifying_tokens ?? "",
+        streak_bonus_enabled: r.data.current.streak_bonus_enabled ?? true,
+        streak_week_threshold: r.data.current.streak_week_threshold ?? 7,
+        streak_month_threshold: r.data.current.streak_month_threshold ?? 30,
+        streak_grace_days: r.data.current.streak_grace_days ?? 1,
+        max_bonus_tickets: r.data.current.max_bonus_tickets ?? 10,
       });
     } catch (err) {
       toast.error("Could not load config", { description: err?.response?.data?.detail || err?.message });
@@ -256,6 +261,11 @@ function ConfigSection() {
       }
       payload.pot_threshold_sol = Number(draft.pot_threshold_sol);
       payload.min_qualifying_tokens = Number(draft.min_qualifying_tokens);
+      payload.streak_bonus_enabled = !!draft.streak_bonus_enabled;
+      payload.streak_week_threshold = Number(draft.streak_week_threshold);
+      payload.streak_month_threshold = Number(draft.streak_month_threshold);
+      payload.streak_grace_days = Number(draft.streak_grace_days);
+      payload.max_bonus_tickets = Number(draft.max_bonus_tickets);
 
       const r = await api.patch("/admin/config", payload);
       setCfg(r.data.current);
@@ -305,6 +315,68 @@ function ConfigSection() {
             currentLabel={Number(cfg?.min_qualifying_tokens || 0).toLocaleString()}
             defaultLabel={Number(defaults?.min_qualifying_tokens || 0).toLocaleString()}
           />
+
+          <div className="border-t border-white/5 pt-5 mt-2">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Flame className="w-4 h-4 text-gold" />
+                <h3 className="font-display font-bold text-base tracking-tight">Long-term Holder Bonus</h3>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!draft.streak_bonus_enabled}
+                  onChange={(e) => setDraft((d) => ({ ...d, streak_bonus_enabled: e.target.checked }))}
+                  className="accent-gold"
+                />
+                <span className="font-mono text-[11px] uppercase tracking-widest text-white/70">
+                  {draft.streak_bonus_enabled ? "Enabled" : "Disabled"}
+                </span>
+              </label>
+            </div>
+            <p className="text-[11px] text-white/40 mb-4 leading-relaxed">
+              Streak counts consecutive rounds (days) a wallet stays qualified. +1 ticket once the streak hits the
+              week threshold, then +1 every additional month. Capped at the bonus cap below.
+            </p>
+            <div className="space-y-4">
+              <ConfigField
+                label="Week Threshold (days)"
+                hint="Days of consecutive qualification before the first +1 bonus kicks in."
+                value={draft.streak_week_threshold}
+                onChange={(v) => setDraft((d) => ({ ...d, streak_week_threshold: v }))}
+                placeholder="7"
+                currentLabel={`${cfg?.streak_week_threshold ?? "?"} days`}
+                defaultLabel={`${defaults?.streak_week_threshold ?? "?"} days`}
+              />
+              <ConfigField
+                label="Month Threshold (days)"
+                hint="Days per additional +1 bonus after the week threshold (defaults to a calendar month)."
+                value={draft.streak_month_threshold}
+                onChange={(v) => setDraft((d) => ({ ...d, streak_month_threshold: v }))}
+                placeholder="30"
+                currentLabel={`${cfg?.streak_month_threshold ?? "?"} days`}
+                defaultLabel={`${defaults?.streak_month_threshold ?? "?"} days`}
+              />
+              <ConfigField
+                label="Grace Days (0 or 1)"
+                hint="Forgive a single missed round per streak. Set 0 for strict streaks."
+                value={draft.streak_grace_days}
+                onChange={(v) => setDraft((d) => ({ ...d, streak_grace_days: v }))}
+                placeholder="1"
+                currentLabel={`${cfg?.streak_grace_days ?? "?"}`}
+                defaultLabel={`${defaults?.streak_grace_days ?? "?"}`}
+              />
+              <ConfigField
+                label="Max Bonus Tickets"
+                hint="Hard cap on bonus tickets — stops a multi-year holder from dominating."
+                value={draft.max_bonus_tickets}
+                onChange={(v) => setDraft((d) => ({ ...d, max_bonus_tickets: v }))}
+                placeholder="10"
+                currentLabel={`+${cfg?.max_bonus_tickets ?? "?"}`}
+                defaultLabel={`+${defaults?.max_bonus_tickets ?? "?"}`}
+              />
+            </div>
+          </div>
 
           <div className="flex items-center justify-between pt-2">
             <div className="text-[10px] font-mono text-white/35 uppercase tracking-widest">

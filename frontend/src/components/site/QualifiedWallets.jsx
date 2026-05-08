@@ -23,6 +23,9 @@ const TICKET_BG = {
   6: "bg-gold/10",
 };
 
+const ticketStyle = (n) => TICKET_STYLES[Math.max(1, Math.min(6, Number(n) || 0))] || TICKET_STYLES[1];
+const ticketBg = (n) => TICKET_BG[Math.max(1, Math.min(6, Number(n) || 0))] || TICKET_BG[1];
+
 const truncWallet = (w) =>
   w ? `${w.slice(0, 6)}...${w.slice(-4)}` : "—";
 
@@ -182,15 +185,23 @@ function GridView({ wallets, totalTickets }) {
           className="p-3 bg-obsidian-900/60 border border-white/5 hover:border-white/15 rounded-sm transition-colors group"
         >
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-[10px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${TICKET_STYLES[w.tickets]} ${TICKET_BG[w.tickets]}`}>
+            <span className={`text-[10px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${ticketStyle(w.tickets)} ${ticketBg(w.tickets)}`}>
               {w.tickets}×
             </span>
+            {w.bonus_tickets > 0 && (
+              <span className="text-[9px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm text-gold bg-gold/10" title={`${w.streak_days}d streak`}>
+                +{w.bonus_tickets}
+              </span>
+            )}
           </div>
           <div className="font-mono text-xs text-white/60 group-hover:text-white/90 transition-colors truncate">
             {truncWallet(w.wallet)}
           </div>
-          <div className="mt-1.5 font-mono text-[10px] text-white/30">
-            {fmtTokens(w.holdings_tokens)}
+          <div className="mt-1.5 font-mono text-[10px] text-white/30 flex items-center justify-between">
+            <span>{fmtTokens(w.holdings_tokens)}</span>
+            {w.streak_days > 0 && (
+              <span className="text-gold/70" title="Consecutive days qualified">🔥 {w.streak_days}d</span>
+            )}
           </div>
           {/* Probability bar */}
           <div className="mt-2 h-0.5 bg-white/5 rounded-full overflow-hidden">
@@ -210,8 +221,9 @@ function ListView({ wallets, totalTickets }) {
     <div className="border border-white/5 rounded-sm overflow-hidden bg-obsidian-900/40">
       <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-4 bg-obsidian-800/50 text-[10px] uppercase tracking-[0.2em] font-mono text-white/45">
         <div className="col-span-1">#</div>
-        <div className="col-span-5">Wallet</div>
+        <div className="col-span-4">Wallet</div>
         <div className="col-span-2">Holdings</div>
+        <div className="col-span-1">Streak</div>
         <div className="col-span-2">Tickets</div>
         <div className="col-span-2 text-right">Win Chance</div>
       </div>
@@ -225,12 +237,24 @@ function ListView({ wallets, totalTickets }) {
           className="grid grid-cols-2 md:grid-cols-12 gap-2 md:gap-4 px-4 md:px-6 py-4 border-t border-white/5 hover:bg-white/[0.02] transition-colors text-sm"
         >
           <div className="col-span-1 font-mono text-white/30 text-xs">{i + 1}</div>
-          <div className="md:col-span-5 font-mono text-white/80 truncate">{w.wallet}</div>
+          <div className="md:col-span-4 font-mono text-white/80 truncate">{w.wallet}</div>
           <div className="md:col-span-2 font-mono text-white/50 text-xs">{fmtTokens(w.holdings_tokens)}</div>
+          <div className="md:col-span-1 font-mono text-xs">
+            {w.streak_days > 0 ? (
+              <span className="text-gold/70" title="Consecutive days qualified">🔥 {w.streak_days}d</span>
+            ) : (
+              <span className="text-white/25">—</span>
+            )}
+          </div>
           <div className="md:col-span-2">
-            <span className={`font-mono font-bold text-sm ${TICKET_STYLES[w.tickets]}`}>
+            <span className={`font-mono font-bold text-sm ${ticketStyle(w.tickets)}`}>
               {w.tickets}×
             </span>
+            {w.bonus_tickets > 0 && (
+              <span className="ml-1.5 font-mono text-[10px] font-bold text-gold/80" title={`${w.base_tickets} base + ${w.bonus_tickets} bonus`}>
+                +{w.bonus_tickets}
+              </span>
+            )}
           </div>
           <div className="md:col-span-2 font-mono text-white/50 text-xs md:text-right">
             {w.win_probability?.toFixed(2)}%

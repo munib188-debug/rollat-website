@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Wallet, Clock, Dice5, Zap } from "lucide-react";
+import { Wallet, Clock, Dice5, Zap, Flame } from "lucide-react";
 
 const steps = [
   {
@@ -25,6 +25,13 @@ const steps = [
   },
   {
     n: "04",
+    title: "Hold Longer, Win More",
+    desc: "Long-term holder bonus stacks on top. +1 ticket at 7 days qualified, then +1 every 30 days after. Diamond hands get extra entries.",
+    icon: Flame,
+    accent: "crimson",
+  },
+  {
+    n: "05",
     title: "Direct SOL Drop",
     desc: "The pot drops straight into the winner's connected wallet as SOL. No claim portal. No NFT trinket. Just instant payout.",
     icon: Zap,
@@ -38,7 +45,7 @@ export default function HowItWorks() {
       <div className="max-w-[1400px] mx-auto">
         <SectionLabel>The Mechanics</SectionLabel>
         <h2 className="font-display font-black text-4xl md:text-5xl tracking-tighter mb-3" data-testid="how-headline">
-          Four steps. <span className="text-white/40">Zero friction.</span>
+          Five steps. <span className="text-white/40">Zero friction.</span>
         </h2>
         <p className="text-white/55 max-w-2xl mb-16 text-base md:text-lg">
           The contract handles qualification, the spin, and the payout. No claim portal hostage,

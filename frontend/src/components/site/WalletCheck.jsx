@@ -205,10 +205,34 @@ function ResultPanel({ r }) {
         <Stat
           label="Tickets"
           value={r.tickets}
+          sub={r.bonus_tickets > 0 ? `${r.base_tickets} base + ${r.bonus_tickets} bonus` : undefined}
           icon={<Ticket className="w-3.5 h-3.5 text-gold" />}
           testid="stat-tickets"
         />
       </div>
+
+      {ok && r.streak_days > 0 && (
+        <div className="border border-gold/20 bg-gold/[0.04] rounded-sm p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-[0.25em] font-mono text-gold">
+              🔥 Long-term Holder Streak
+            </div>
+            <span className="font-mono font-bold text-sm text-gold">
+              {r.streak_days} day{r.streak_days === 1 ? "" : "s"}
+            </span>
+          </div>
+          {r.bonus_tickets > 0 && (
+            <div className="text-xs text-white/70 font-mono mb-2">
+              +{r.bonus_tickets} bonus ticket{r.bonus_tickets === 1 ? "" : "s"} active.
+            </div>
+          )}
+          {r.days_to_next_bonus != null && r.next_bonus_amount != null && (
+            <div className="text-[11px] text-white/50 font-mono">
+              {r.days_to_next_bonus} day{r.days_to_next_bonus === 1 ? "" : "s"} until +{r.next_bonus_amount} bonus.
+            </div>
+          )}
+        </div>
+      )}
 
       <div>
         <div className="flex justify-between text-[10px] uppercase tracking-[0.2em] font-mono text-white/45 mb-2">

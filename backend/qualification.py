@@ -21,6 +21,40 @@ EXCLUDED_WALLETS: frozenset[str] = frozenset({
 })
 
 
+def bonus_for_streak(streak_days: int, cfg: Optional[dict] = None) -> int:
+    """Long-term holder bonus tickets, layered on top of base tickets.
+
+    Default ladder: +1 at 7 days, +1 every additional 30 days after.
+    All knobs are overridable via runtime_config so the admin panel can tweak
+    them without redeploying.
+
+    Examples (defaults week=7, month=30, cap=10):
+      0..6  -> 0
+      7..29 -> 1
+      30..59 -> 2 (1 + (30//30) = 2)
+      60..89 -> 3
+      90..119 -> 4
+      ...
+    """
+    cfg = cfg or {}
+    if not cfg.get("streak_bonus_enabled", True):
+        return 0
+    try:
+        s = int(streak_days or 0)
+    except (TypeError, ValueError):
+        return 0
+    if s <= 0:
+        return 0
+    week = max(1, int(cfg.get("streak_week_threshold", 7)))
+    month = max(1, int(cfg.get("streak_month_threshold", 30)))
+    cap = max(0, int(cfg.get("max_bonus_tickets", 10)))
+    if s < week:
+        return 0
+    if s < month:
+        return min(1, cap)
+    return min(1 + (s // month), cap)
+
+
 def tickets_for_holdings(tokens: float) -> int:
     """Same tier table the website's TierRow display advertises."""
     if tokens < 1_000_000:   return 0

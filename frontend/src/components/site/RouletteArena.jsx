@@ -304,7 +304,14 @@ function WinnerReveal({ winner, stats }) {
             </motion.div>
 
             <div className="font-mono text-sm text-white/40 mb-8">
-              {winner.tickets}× tickets · {stats?.total_qualified_wallets ? `1 of ${stats.total_qualified_wallets} qualified wallets` : ""}
+              {winner.bonus_tickets > 0 ? (
+                <>
+                  {winner.tickets}× tickets <span className="text-gold/80">({winner.base_tickets} base + {winner.bonus_tickets} bonus · 🔥 {winner.streak_days}d)</span>
+                </>
+              ) : (
+                <>{winner.tickets}× tickets</>
+              )}
+              {stats?.total_qualified_wallets ? <> · 1 of {stats.total_qualified_wallets} qualified wallets</> : null}
             </div>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

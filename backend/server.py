@@ -74,10 +74,12 @@ from qualification import (
     compute_wallet_status,
     fetch_recent_snapshots,
     has_sufficient_history,
+    bonus_for_streak,
     REQUIRED_SNAPSHOTS,
     EXCLUDED_WALLETS,
     MIN_QUALIFYING_TOKENS,
 )
+from streaks import StreakStore
 
 
 ROOT_DIR = Path(__file__).parent
@@ -262,6 +264,11 @@ class WalletStatus(BaseModel):
     snapshots: List[bool]  # 24 booleans
     is_recent_winner: bool
     next_qualification_in_hours: Optional[int] = None
+    base_tickets: int = 0
+    bonus_tickets: int = 0
+    streak_days: int = 0
+    days_to_next_bonus: Optional[int] = None
+    next_bonus_amount: Optional[int] = None
 
 
 class SpinState(BaseModel):
@@ -427,6 +434,12 @@ def _runtime_defaults() -> dict:
         "pot_threshold_sol": float(POT_THRESHOLD_SOL),
         "min_qualifying_tokens": int(MIN_QUALIFYING_TOKENS),
         "excluded_wallets": sorted(EXCLUDED_WALLETS),
+        # Long-term holder bonus
+        "streak_bonus_enabled": True,
+        "streak_week_threshold": 7,
+        "streak_month_threshold": 30,
+        "streak_grace_days": 1,
+        "max_bonus_tickets": 10,
     }
 
 
@@ -458,6 +471,16 @@ async def get_runtime_config(force_refresh: bool = False) -> dict:
             cfg["min_qualifying_tokens"] = int(doc["min_qualifying_tokens"])
         if "excluded_wallets" in doc and isinstance(doc["excluded_wallets"], list):
             cfg["excluded_wallets"] = [str(w) for w in doc["excluded_wallets"]]
+        if "streak_bonus_enabled" in doc:
+            cfg["streak_bonus_enabled"] = bool(doc["streak_bonus_enabled"])
+        if "streak_week_threshold" in doc and doc["streak_week_threshold"] is not None:
+            cfg["streak_week_threshold"] = int(doc["streak_week_threshold"])
+        if "streak_month_threshold" in doc and doc["streak_month_threshold"] is not None:
+            cfg["streak_month_threshold"] = int(doc["streak_month_threshold"])
+        if "streak_grace_days" in doc and doc["streak_grace_days"] is not None:
+            cfg["streak_grace_days"] = int(doc["streak_grace_days"])
+        if "max_bonus_tickets" in doc and doc["max_bonus_tickets"] is not None:
+            cfg["max_bonus_tickets"] = int(doc["max_bonus_tickets"])
         cfg["updated_at"] = doc.get("updated_at")
         cfg["updated_by"] = doc.get("updated_by")
 
@@ -473,6 +496,7 @@ def _invalidate_runtime_cfg_cache() -> None:
 
 nonce_store: Optional[NonceStore] = None
 snapshot_store: Optional[SnapshotStore] = None
+streak_store: Optional[StreakStore] = None
 
 
 async def daily_reminder_loop() -> None:
@@ -504,7 +528,7 @@ async def daily_reminder_loop() -> None:
 
 @app.on_event("startup")
 async def on_startup():
-    global USE_MONGO, nonce_store, snapshot_store
+    global USE_MONGO, nonce_store, snapshot_store, streak_store
 
     # Fail fast if JWT_SECRET is missing or too short — auth cannot work safely without it.
     from auth import JWT_SECRET as _jwt_secret
@@ -542,6 +566,9 @@ async def on_startup():
     snapshot_store = SnapshotStore(_get_col("holder_snapshots"))
     await snapshot_store.ensure_indexes()
     snapshot_store.start_loop()
+
+    streak_store = StreakStore(_get_col("holder_streaks"))
+    await streak_store.ensure_indexes()
 
     winners_col = _get_col("winners")
     spin_col = _get_col("spin_state")
@@ -925,6 +952,32 @@ async def admin_patch_config(payload: dict, admin: str = Depends(get_admin_walle
             raise HTTPException(status_code=400, detail="excluded_wallets cannot exceed 500 entries")
         update["excluded_wallets"] = cleaned
 
+    if "streak_bonus_enabled" in payload:
+        update["streak_bonus_enabled"] = bool(payload["streak_bonus_enabled"])
+
+    for fld, lo in (
+        ("streak_week_threshold", 1),
+        ("streak_month_threshold", 1),
+        ("max_bonus_tickets", 0),
+    ):
+        if fld in payload:
+            try:
+                n = int(payload[fld])
+                if n < lo:
+                    raise ValueError
+                update[fld] = n
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"{fld} must be an integer >= {lo}")
+
+    if "streak_grace_days" in payload:
+        try:
+            n = int(payload["streak_grace_days"])
+            if n not in (0, 1):
+                raise ValueError
+            update["streak_grace_days"] = n
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="streak_grace_days must be 0 or 1")
+
     if not update:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
@@ -1012,15 +1065,54 @@ async def _wallet_check_core(wallet: str) -> "WalletStatus":
     is_qualified = status["is_qualified"] and not is_recent_winner and wallet not in excl
     next_in = None if is_qualified else max(1, REQUIRED_SNAPSHOTS - status["hours_held"])
 
+    base_tickets = int(status["tickets"] if is_qualified else 0)
+    streak_days = 0
+    bonus_tickets = 0
+    days_to_next = None
+    next_bonus_amount = None
+
+    if streak_store is not None:
+        try:
+            spin_doc = await _get_col("spin_state").find_one({"_id": "singleton"})
+            current_round = int((spin_doc or {}).get("round_number") or 0)
+            grace_days = int(cfg.get("streak_grace_days", 1))
+            sd_doc = await streak_store.get_streak(wallet)
+            if sd_doc:
+                last_round = int(sd_doc.get("last_qualified_round") or 0)
+                if last_round and (current_round == 0 or current_round - last_round <= 1 + grace_days):
+                    streak_days = int(sd_doc.get("current_streak_days") or 0)
+            bonus_tickets = bonus_for_streak(streak_days, cfg) if is_qualified else 0
+            # Compute days until the next bonus tier kicks in.
+            if cfg.get("streak_bonus_enabled", True):
+                week = max(1, int(cfg.get("streak_week_threshold", 7)))
+                month = max(1, int(cfg.get("streak_month_threshold", 30)))
+                cap = max(0, int(cfg.get("max_bonus_tickets", 10)))
+                if bonus_tickets < cap:
+                    if streak_days < week:
+                        days_to_next = week - streak_days
+                        next_bonus_amount = 1
+                    else:
+                        # next +1 happens at the next multiple of `month` from 0
+                        next_threshold = ((streak_days // month) + 1) * month
+                        days_to_next = next_threshold - streak_days
+                        next_bonus_amount = bonus_tickets + 1
+        except Exception:
+            logger.exception("wallet-check streak lookup failed")
+
     return WalletStatus(
         wallet=wallet,
         is_qualified=is_qualified,
         holdings_tokens=holdings,
-        tickets=status["tickets"] if is_qualified else 0,
+        tickets=base_tickets + bonus_tickets,
         hours_held=status["hours_held"],
         snapshots=status["snapshots"],
         is_recent_winner=is_recent_winner,
         next_qualification_in_hours=next_in,
+        base_tickets=base_tickets,
+        bonus_tickets=bonus_tickets,
+        streak_days=streak_days,
+        days_to_next_bonus=days_to_next,
+        next_bonus_amount=next_bonus_amount,
     )
 
 
@@ -1122,6 +1214,31 @@ async def _run_daily_spin_core() -> dict:
     now = datetime.now(timezone.utc).isoformat()
     round_number = (doc.get("round_number", 0) + 1) if doc else 1
 
+    # Long-term holder bonus: advance streaks for everyone qualified this round,
+    # then decorate each participant with base/bonus/total tickets.
+    if streak_store is not None and participants:
+        try:
+            wallets = [p["wallet"] for p in participants]
+            streak_docs = await streak_store.update_streaks_for_round(
+                wallets,
+                round_number,
+                grace_days=int(cfg.get("streak_grace_days", 1)),
+            )
+            for p in participants:
+                streak_doc = streak_docs.get(p["wallet"])
+                streak_days = int((streak_doc or {}).get("current_streak_days") or 0)
+                bonus = bonus_for_streak(streak_days, cfg)
+                p["base_tickets"] = int(p.get("tickets") or 0)
+                p["streak_days"] = streak_days
+                p["bonus_tickets"] = bonus
+                p["tickets"] = p["base_tickets"] + bonus
+        except Exception:
+            logger.exception("streak update/decoration failed — continuing with base tickets only")
+            for p in participants:
+                p.setdefault("base_tickets", int(p.get("tickets") or 0))
+                p.setdefault("streak_days", 0)
+                p.setdefault("bonus_tickets", 0)
+
     await _get_col("spin_state").update_one(
         {"_id": "singleton"},
         {"$set": {
@@ -1212,6 +1329,9 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
     winner_data = {
         "wallet": winner_entry["wallet"],
         "tickets": winner_entry["tickets"],
+        "base_tickets": int(winner_entry.get("base_tickets") or winner_entry.get("tickets") or 0),
+        "bonus_tickets": int(winner_entry.get("bonus_tickets") or 0),
+        "streak_days": int(winner_entry.get("streak_days") or 0),
         "amount_sol": amount_sol,
         "round_number": round_number,
     }
@@ -1223,6 +1343,9 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
         "wallet": winner_entry["wallet"],
         "amount_sol": amount_sol,
         "tickets": winner_entry["tickets"],
+        "base_tickets": winner_data["base_tickets"],
+        "bonus_tickets": winner_data["bonus_tickets"],
+        "streak_days": winner_data["streak_days"],
         "participants_count": len(participants),
         "won_at": now.isoformat(),
     })
@@ -1284,8 +1407,38 @@ async def get_qualified_wallets(page: int = 1, per_page: int = 50, search: str =
         s = search.lower()
         all_wallets = [w for w in all_wallets if s in w["wallet"].lower()]
 
+    # Look up the *current* round so we can tell live streaks from dead ones.
+    spin_doc = await _get_col("spin_state").find_one({"_id": "singleton"})
+    current_round = int((spin_doc or {}).get("round_number") or 0)
+    grace_days = int(cfg.get("streak_grace_days", 1))
+
+    # Decorate the page wallets with their current streak + bonus tickets.
+    streak_docs: dict = {}
+    if streak_store is not None and all_wallets:
+        try:
+            streak_docs = await streak_store.bulk_get_streaks([w["wallet"] for w in all_wallets])
+        except Exception:
+            logger.exception("bulk_get_streaks failed in /qualified-wallets")
+            streak_docs = {}
+    for w in all_wallets:
+        sd = streak_docs.get(w["wallet"]) or {}
+        last_round = int(sd.get("last_qualified_round") or 0)
+        # Treat the streak as alive only if the wallet was qualified within the last (1+grace) rounds.
+        if last_round and (current_round == 0 or current_round - last_round <= 1 + grace_days):
+            streak_days = int(sd.get("current_streak_days") or 0)
+        else:
+            streak_days = 0
+        bonus = bonus_for_streak(streak_days, cfg)
+        base = int(w.get("tickets") or 0)
+        w["base_tickets"] = base
+        w["streak_days"] = streak_days
+        w["bonus_tickets"] = bonus
+        w["tickets"] = base + bonus
+
     total = len(all_wallets)
     total_tickets = sum(w["tickets"] for w in all_wallets)
+    # Re-sort so wallets with bonus tickets float up the leaderboard.
+    all_wallets.sort(key=lambda w: (w["tickets"], w.get("min_balance", 0)), reverse=True)
     start = max(0, (page - 1) * per_page)
     end = start + per_page
     page_wallets = all_wallets[start:end]

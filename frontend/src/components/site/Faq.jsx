@@ -15,6 +15,10 @@ const faqs = [
     a: "1M – 2M = 1 ticket · 2M – 4M = 2 · 4M – 6M = 3 · 6M – 8M = 4 · 8M – 10M = 5 · 10M+ = 6 (cap). Bigger bag, more shots — capped so nobody dominates the wheel.",
   },
   {
+    q: "How does the long-term holder bonus work?",
+    a: "On top of your base tickets, you earn bonus tickets the longer you stay qualified. +1 ticket at 7 consecutive days qualified, then +1 every additional 30 days (so 30d → +2, 60d → +3, 90d → +4, …). One missed snapshot is forgiven; two breaks the streak. Bonus tickets stack on top of the base 6-ticket cap, so a long-term whale can have more than 6 entries in the wheel.",
+  },
+  {
     q: "How does the payout work?",
     a: "The pot drops directly into the winner's connected wallet as SOL the moment the spin resolves. No claim portal, no manual approval, no NFT — just an instant on-chain transfer.",
   },
