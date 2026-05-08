@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
-import { Search, CheckCircle2, AlertCircle, Ticket, Wallet } from "lucide-react";
+import { Search, CheckCircle2, AlertCircle, Ticket, Wallet, Flame } from "lucide-react";
 import { SectionLabel } from "./HowItWorks";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -98,6 +98,31 @@ export default function WalletCheck() {
             <TierRow range="8M – 10M" tickets="5" />
             <TierRow range="10M+" tickets="6" note="cap" highlight />
             <div className="pt-2 text-crimson text-xs">→ Recent winners are locked out for 1 round</div>
+          </div>
+
+          <div
+            className="mt-6 border border-gold/25 bg-gradient-to-br from-gold/[0.06] to-transparent rounded-sm p-5"
+            data-testid="long-term-holder-banner"
+          >
+            <div className="flex items-center gap-2.5 mb-2">
+              <Flame className="w-4 h-4 text-gold" />
+              <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold">
+                Long-term Holder Bonus
+              </div>
+            </div>
+            <div className="font-display font-bold text-base tracking-tight mb-2">
+              Hold longer, win more.
+            </div>
+            <p className="text-white/60 text-[13px] leading-relaxed mb-3">
+              On top of base tickets, every qualified wallet earns <span className="text-gold font-semibold">+1 ticket at 7 consecutive days</span>,
+              then <span className="text-gold font-semibold">+1 every 30 days after</span>. One missed snapshot is forgiven; two breaks the streak.
+            </p>
+            <div className="grid grid-cols-4 gap-2 font-mono text-[10px] uppercase tracking-widest text-white/45">
+              <div className="text-center border border-white/10 rounded-sm py-1.5">7d <span className="text-gold">+1</span></div>
+              <div className="text-center border border-white/10 rounded-sm py-1.5">30d <span className="text-gold">+2</span></div>
+              <div className="text-center border border-white/10 rounded-sm py-1.5">60d <span className="text-gold">+3</span></div>
+              <div className="text-center border border-white/10 rounded-sm py-1.5 text-white/30">…</div>
+            </div>
           </div>
         </div>
 
