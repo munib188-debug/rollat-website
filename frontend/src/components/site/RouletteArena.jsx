@@ -23,7 +23,15 @@ const fmtSol = (n) =>
 
 export default function RouletteArena() {
   const { spinState, stats } = useSpinPhase() || {};
-  const phase = spinState?.phase || "idle";
+  const rawPhase = spinState?.phase || "idle";
+  // Derive awaiting_funds from live pot balance so it shows immediately,
+  // not just after the next 12:00 UTC attempt writes it to the DB.
+  const potBelowPrize =
+    rawPhase === "idle" &&
+    stats?.fixed_prize_sol != null &&
+    stats?.current_pot_sol != null &&
+    stats.current_pot_sol < stats.fixed_prize_sol;
+  const phase = potBelowPrize ? "awaiting_funds" : rawPhase;
   const t = useCountdown(stats?.next_spin_at);
 
   return (
