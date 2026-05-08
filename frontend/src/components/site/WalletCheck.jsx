@@ -90,13 +90,13 @@ export default function WalletCheck() {
             your bag is worth right now.
           </p>
           <div className="space-y-2 text-sm text-white/60 font-mono">
-            <TierRow range="< 100K" tickets="0" note="Not qualified" dim />
-            <TierRow range="100K – 1M" tickets="1" />
-            <TierRow range="1M – 1.5M" tickets="2" />
-            <TierRow range="1.5M – 2M" tickets="3" />
-            <TierRow range="2M – 2.5M" tickets="4" />
-            <TierRow range="2.5M – 3M" tickets="5" />
-            <TierRow range="3M+" tickets="6" note="cap" highlight />
+            <TierRow range="< 1M" tickets="0" note="Not qualified" dim />
+            <TierRow range="1M – 2M" tickets="1" />
+            <TierRow range="2M – 4M" tickets="2" />
+            <TierRow range="4M – 6M" tickets="3" />
+            <TierRow range="6M – 8M" tickets="4" />
+            <TierRow range="8M – 10M" tickets="5" />
+            <TierRow range="10M+" tickets="6" note="cap" highlight />
             <div className="pt-2 text-crimson text-xs">→ Recent winners are locked out for 1 round</div>
           </div>
         </div>

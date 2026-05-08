@@ -27,12 +27,12 @@ const fmtTokens = (n) => {
 function tierLabel(tickets) {
   switch (tickets) {
     case 6: return "Whale tier · cap";
-    case 5: return "2.5M+ · 5 tickets";
-    case 4: return "2M+ · 4 tickets";
-    case 3: return "1.5M+ · 3 tickets";
-    case 2: return "1M+ · 2 tickets";
-    case 1: return "100K+ · 1 ticket";
-    default: return "Need 100K+ to qualify";
+    case 5: return "8M+ · 5 tickets";
+    case 4: return "6M+ · 4 tickets";
+    case 3: return "4M+ · 3 tickets";
+    case 2: return "2M+ · 2 tickets";
+    case 1: return "1M+ · 1 ticket";
+    default: return "Need 1M+ to qualify";
   }
 }
 

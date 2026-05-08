@@ -12,7 +12,7 @@ because that's the amount the wallet actually held continuously.
 from __future__ import annotations
 from typing import Optional
 
-MIN_QUALIFYING_TOKENS = 100_000
+MIN_QUALIFYING_TOKENS = 1_000_000
 REQUIRED_SNAPSHOTS = 24
 
 # Wallets permanently excluded from qualification and spin pool (e.g. liquidity pool).
@@ -23,12 +23,12 @@ EXCLUDED_WALLETS: frozenset[str] = frozenset({
 
 def tickets_for_holdings(tokens: float) -> int:
     """Same tier table the website's TierRow display advertises."""
-    if tokens < 100_000:    return 0
-    if tokens < 1_000_000:  return 1
-    if tokens < 1_500_000:  return 2
-    if tokens < 2_000_000:  return 3
-    if tokens < 2_500_000:  return 4
-    if tokens < 3_000_000:  return 5
+    if tokens < 1_000_000:   return 0
+    if tokens < 2_000_000:   return 1
+    if tokens < 4_000_000:   return 2
+    if tokens < 6_000_000:   return 3
+    if tokens < 8_000_000:   return 4
+    if tokens < 10_000_000:  return 5
     return 6
 
 

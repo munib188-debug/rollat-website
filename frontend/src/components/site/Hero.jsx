@@ -73,7 +73,7 @@ export default function Hero() {
             className="mt-7 text-lg text-white/60 max-w-2xl leading-relaxed"
             data-testid="hero-subheadline"
           >
-            Hold ≥ 100,000 $ROLLAT for 24 continuous hours. Every snapshot you survive
+            Hold ≥ 1,000,000 $ROLLAT for 24 continuous hours. Every snapshot you survive
             keeps you in the wheel. Every 24 hours, Switchboard VRF picks one wallet —
             the entire pot drops straight into their connected wallet as SOL. No team
             votes. No bias. Just code.

@@ -8,11 +8,11 @@ const faqs = [
   },
   {
     q: "What's the minimum to qualify?",
-    a: "100,000 $ROLLAT held continuously for 24 hours. The contract takes hourly snapshots — only wallets present in all 24 consecutive snapshots qualify for the next spin.",
+    a: "1,000,000 $ROLLAT held continuously for 24 hours. The contract takes hourly snapshots — only wallets present in all 24 consecutive snapshots qualify for the next spin.",
   },
   {
     q: "How do tickets scale?",
-    a: "100K – 1M = 1 ticket · 1M – 1.5M = 2 · 1.5M – 2M = 3 · 2M – 2.5M = 4 · 2.5M – 3M = 5 · 3M+ = 6 (cap). Bigger bag, more shots — capped so nobody dominates the wheel.",
+    a: "1M – 2M = 1 ticket · 2M – 4M = 2 · 4M – 6M = 3 · 6M – 8M = 4 · 8M – 10M = 5 · 10M+ = 6 (cap). Bigger bag, more shots — capped so nobody dominates the wheel.",
   },
   {
     q: "How does the payout work?",

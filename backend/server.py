@@ -344,18 +344,18 @@ broadcaster = SpinBroadcaster()
 
 
 def tickets_for_holdings(tokens: float) -> int:
-    """100k qualifies. ≤500k→1, 1M→2, 1.5M→3, 2M→4, 2.5M→5, 3M+→6 (cap)."""
-    if tokens < 100_000:
-        return 0
+    """1M qualifies. 1M→1, 2M→2, 4M→3, 6M→4, 8M→5, 10M+→6 (cap)."""
     if tokens < 1_000_000:
-        return 1
-    if tokens < 1_500_000:
-        return 2
+        return 0
     if tokens < 2_000_000:
+        return 1
+    if tokens < 4_000_000:
+        return 2
+    if tokens < 6_000_000:
         return 3
-    if tokens < 2_500_000:
+    if tokens < 8_000_000:
         return 4
-    if tokens < 3_000_000:
+    if tokens < 10_000_000:
         return 5
     return 6
 
@@ -390,11 +390,11 @@ def generate_mock_qualified_wallets(count: int = 347) -> List[dict]:
         # Vary the address slightly for uniqueness
         suffix = f"{seed % 9999:04d}"
         wallet = wallet[:18] + suffix
-        holdings = round(rng.uniform(100_000, 3_400_000), 0)
+        holdings = round(rng.uniform(1_000_000, 12_000_000), 0)
         tickets = tickets_for_holdings(holdings)
         if tickets == 0:
             tickets = 1
-            holdings = 150_000
+            holdings = 1_200_000
         wallets.append({
             "wallet": wallet,
             "tickets": tickets,

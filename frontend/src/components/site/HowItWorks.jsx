@@ -4,8 +4,8 @@ import { Wallet, Clock, Dice5, Zap } from "lucide-react";
 const steps = [
   {
     n: "01",
-    title: "Hold 100K+",
-    desc: "Buy and hold at least 100,000 $ROLLAT in any Solana wallet. That's your buy-in. No staking contract, no lockup.",
+    title: "Hold 1M+",
+    desc: "Buy and hold at least 1,000,000 $ROLLAT in any Solana wallet. That's your buy-in. No staking contract, no lockup.",
     icon: Wallet,
     accent: "gold",
   },

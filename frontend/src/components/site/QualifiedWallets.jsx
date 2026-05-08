@@ -150,7 +150,7 @@ function BootstrapNotice({ captured }) {
       </h3>
       <p className="text-white/55 max-w-xl mx-auto text-sm md:text-base mb-6">
         Holders are snapshotted every hour. Once 24 consecutive snapshots accumulate,
-        every wallet that held ≥ 100 K $ROLLAT in all of them gets entered into the wheel.
+        every wallet that held ≥ 1M $ROLLAT in all of them gets entered into the wheel.
         No bootstrapping with mock data — just patience.
       </p>
       <div className="max-w-md mx-auto">
