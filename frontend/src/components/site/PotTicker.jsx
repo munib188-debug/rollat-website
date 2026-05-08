@@ -18,7 +18,7 @@ export default function PotTicker() {
   const phaseLabel =
     phase === "spinning" ? "SPINNING" :
     phase === "resolved" ? "WINNER" :
-    phase === "awaiting_funds" ? "AWAITING FUNDS" :
+    phase === "awaiting_funds" ? "POT BUILDING" :
     "IDLE";
   const phaseAccent =
     phase === "spinning" ? "crimson" :

@@ -78,7 +78,7 @@ export default function RouletteArena() {
 function PhaseIndicator({ phase }) {
   const configs = {
     idle: { dot: "bg-emerald_neon", text: "text-emerald_neon", label: "IDLE · AWAITING SPIN" },
-    awaiting_funds: { dot: "bg-white/40", text: "text-white/50", label: "AWAITING FUNDS" },
+    awaiting_funds: { dot: "bg-white/40", text: "text-white/50", label: "POT BUILDING" },
     spinning: { dot: "bg-crimson animate-ping", text: "text-crimson", label: "SPINNING · LIVE NOW" },
     resolved: { dot: "bg-gold", text: "text-gold", label: "WINNER ANNOUNCED" },
   };
@@ -99,7 +99,7 @@ function IdleDisplay({ t, stats, awaitingFunds }) {
         {awaitingFunds && (
           <div className="mb-6 px-5 py-4 rounded-sm border-2 font-mono text-sm font-bold uppercase tracking-widest"
             style={{ borderColor: "#FF3366", backgroundColor: "#FF336615", color: "#FF3366" }}>
-            ⚠ Pot below 0.1 SOL — today's spin skipped. Top up the wallet to resume.
+            ⚠ Pot building — needs 0.1 SOL to spin. Buy $ROLLAT to fuel the next round.
           </div>
         )}
         <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-4">
