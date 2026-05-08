@@ -894,23 +894,24 @@ async def _run_daily_spin_core() -> dict:
     # and the winner gets FIXED_DAILY_PRIZE_SOL regardless of pot balance.
     pot_check = await fetch_pot_balance()
     pot_check_sol = round(float(pot_check or 0), 4)
-    if FIXED_DAILY_PRIZE_SOL is None and pot_check_sol < POT_THRESHOLD_SOL:
+    prize_required = float(FIXED_DAILY_PRIZE_SOL) if FIXED_DAILY_PRIZE_SOL is not None else POT_THRESHOLD_SOL
+    if pot_check_sol < prize_required:
         rollover_count = (doc.get("rollover_count", 0) + 1) if doc else 1
         await _get_col("spin_state").update_one(
             {"_id": "singleton"},
-            {"$set": {"rollover_count": rollover_count}},
+            {"$set": {"rollover_count": rollover_count, "phase": "awaiting_funds"}},
             upsert=True,
         )
         asyncio.create_task(announce_rollover(
             pot_sol=pot_check_sol,
-            threshold_sol=POT_THRESHOLD_SOL,
+            threshold_sol=prize_required,
             rollover_count=rollover_count,
         ))
-        logger.info(f"[spin] rollover #{rollover_count} — pot {pot_check_sol} SOL < threshold {POT_THRESHOLD_SOL} SOL")
+        logger.info(f"[spin] rollover #{rollover_count} — pot {pot_check_sol} SOL < required {prize_required} SOL")
         return {
             "status": "rollover",
             "pot_sol": pot_check_sol,
-            "threshold_sol": POT_THRESHOLD_SOL,
+            "threshold_sol": prize_required,
             "rollover_count": rollover_count,
         }
 

@@ -38,9 +38,9 @@ export default function RouletteArena() {
         </div>
 
         <AnimatePresence mode="wait">
-          {phase === "idle" && (
+          {(phase === "idle" || phase === "awaiting_funds") && (
             <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <IdleDisplay t={t} stats={stats} />
+              <IdleDisplay t={t} stats={stats} awaitingFunds={phase === "awaiting_funds"} />
             </motion.div>
           )}
           {phase === "spinning" && (
@@ -70,6 +70,7 @@ export default function RouletteArena() {
 function PhaseIndicator({ phase }) {
   const configs = {
     idle: { dot: "bg-emerald_neon", text: "text-emerald_neon", label: "IDLE · AWAITING SPIN" },
+    awaiting_funds: { dot: "bg-white/40", text: "text-white/50", label: "AWAITING FUNDS" },
     spinning: { dot: "bg-crimson animate-ping", text: "text-crimson", label: "SPINNING · LIVE NOW" },
     resolved: { dot: "bg-gold", text: "text-gold", label: "WINNER ANNOUNCED" },
   };
@@ -82,11 +83,16 @@ function PhaseIndicator({ phase }) {
   );
 }
 
-function IdleDisplay({ t, stats }) {
+function IdleDisplay({ t, stats, awaitingFunds }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
       {/* Left: countdown + info */}
       <div>
+        {awaitingFunds && (
+          <div className="mb-6 px-4 py-3 rounded-sm border border-white/10 bg-white/[0.03] font-mono text-xs text-white/50 uppercase tracking-widest">
+            ⚠ Pot below 0.1 SOL — spin skipped until funds are topped up.
+          </div>
+        )}
         <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-4">
           {t.firing ? "Spin Starting" : "Next Spin In"}
         </div>
