@@ -347,13 +347,15 @@ export default function TournamentWheel({ roll, eliminatedSet }) {
               calloutEntry={calloutEntry}
             />
 
-            {/* Pointer at 12 o'clock */}
+            {/* Pointer at 12 o'clock — apex points DOWN into the wheel,
+                so the user instinctively reads "this is the slice that just
+                got picked". Base sits above the outer rim, tip touches it. */}
             <motion.polygon
-              points={`0,${-RADIUS - 22} -18,${-RADIUS + 6} 18,${-RADIUS + 6}`}
+              points={`0,${-RADIUS + 6} -18,${-RADIUS - 22} 18,${-RADIUS - 22}`}
               fill={ACCENT}
               stroke="#0A0D0B"
               strokeWidth="2"
-              animate={{ y: [0, -2, 0] }}
+              animate={{ y: [0, 2, 0] }}
               transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
             />
           </svg>
