@@ -109,12 +109,14 @@ export default function TournamentWheel({ roll, entryMap, eliminatedSet }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roll.eliminated?.length]);
 
-  if (N === 0) return null;
-
+  // NOTE: hooks must run in the same order on every render — useMemo is
+  // declared *before* the early-return below.
   const survivorsRemaining = useMemo(
     () => entries.filter((e) => !eliminatedSet.has(e.id)).length,
     [entries, eliminatedSet],
   );
+
+  if (N === 0) return null;
 
   return (
     <div
