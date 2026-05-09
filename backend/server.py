@@ -99,6 +99,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------- DB setup (MongoDB with in-memory fallback) ----------
+# Render deploy trigger.
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 db_name = os.environ.get('DB_NAME', 'rollat_database')
 
