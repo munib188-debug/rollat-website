@@ -54,7 +54,9 @@ MAX_POT_SOL = 10_000.0
 
 # How long the resolved winner card lingers on the public page after the spin
 # finishes. After this window elapses, /dev/roll/current returns null again.
-RESOLVED_DISPLAY_SECS = 300
+# 24h gives the community a full day to celebrate / share before the page
+# clears for the next roll.
+RESOLVED_DISPLAY_SECS = int(os.environ.get("DEV_ROLL_RESOLVED_DISPLAY_SECS", "86400"))
 
 # Caps for elimination-mode interval (5 seconds .. 7 days).
 MIN_ELIM_INTERVAL_SECS = 5
