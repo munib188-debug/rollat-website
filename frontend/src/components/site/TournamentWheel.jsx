@@ -67,7 +67,10 @@ const slicePath = (i, sliceAngle) => {
  *   3. A "JUST ELIMINATED" callout above the wheel for ~2.5s.
  */
 export default function TournamentWheel({ roll, entryMap, eliminatedSet }) {
-  const entries = roll.entries || [];
+  // Stabilize `entries` identity across renders — a bare `|| []` fallback
+  // creates a fresh array literal each render, which would invalidate every
+  // hook depending on it (ESLint catches this; CI fails the build).
+  const entries = useMemo(() => roll.entries || [], [roll.entries]);
   const N = entries.length;
   const sliceAngle = N > 0 ? 360 / N : 0;
   const winnerId = roll.phase === "resolved" ? roll.winner_entry_id : null;
