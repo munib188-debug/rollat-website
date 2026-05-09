@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import {
   ArrowLeft, Wallet, Pen, ShieldAlert, ShieldCheck, Save,
   Settings, UserX, Camera, Trash2, Plus, RefreshCw, Flame,
+  MessageSquare, Send, Power, RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -110,6 +111,7 @@ export default function SystemAdmin() {
       <ConfigSection />
       <ExclusionsSection />
       <SnapshotsSection />
+      <TelegramBotSection />
     </Shell>
   );
 }
@@ -642,6 +644,321 @@ function SnapshotsSection() {
             </div>
           ))}
         </div>
+      )}
+    </section>
+  );
+}
+
+// ─── Telegram bot controls ──────────────────────────────────────────────────
+
+function TelegramBotSection() {
+  const [events, setEvents] = useState([]);            // [{name, label, default_template, vars}, ...]
+  const [enabled, setEnabled] = useState(true);        // tg_announcements_enabled
+  const [disabledSet, setDisabledSet] = useState(new Set()); // names disabled
+  const [templates, setTemplates] = useState({});      // { name: customString }
+  const [editing, setEditing] = useState(null);        // currently edited event name
+  const [draftTpl, setDraftTpl] = useState("");
+  const [savingTpl, setSavingTpl] = useState(false);
+  const [savingToggles, setSavingToggles] = useState(false);
+  const [customMsg, setCustomMsg] = useState("");
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [eRes, cRes] = await Promise.all([
+        api.get("/admin/telegram/events"),
+        api.get("/admin/config"),
+      ]);
+      const evList = eRes.data?.events || [];
+      setEvents(evList);
+      const cur = cRes.data?.current || {};
+      setEnabled(cur.tg_announcements_enabled !== false);
+      setDisabledSet(new Set(cur.tg_event_disabled || []));
+      setTemplates(cur.tg_templates || {});
+    } catch (err) {
+      toast.error("Could not load Telegram settings", {
+        description: err?.response?.data?.detail || err?.message,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggleEnabled = async (val) => {
+    setSavingToggles(true);
+    try {
+      await api.patch("/admin/config", { tg_announcements_enabled: val });
+      setEnabled(val);
+      toast.success(val ? "Announcements enabled" : "Announcements paused");
+    } catch (err) {
+      toast.error("Save failed", { description: err?.response?.data?.detail || err?.message });
+    } finally {
+      setSavingToggles(false);
+    }
+  };
+
+  const toggleEvent = async (name) => {
+    const next = new Set(disabledSet);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    setSavingToggles(true);
+    try {
+      await api.patch("/admin/config", { tg_event_disabled: Array.from(next) });
+      setDisabledSet(next);
+    } catch (err) {
+      toast.error("Save failed", { description: err?.response?.data?.detail || err?.message });
+    } finally {
+      setSavingToggles(false);
+    }
+  };
+
+  const startEditing = (event) => {
+    setEditing(event.name);
+    setDraftTpl(templates[event.name] ?? event.default_template);
+  };
+
+  const saveTemplate = async () => {
+    if (!editing) return;
+    const event = events.find((e) => e.name === editing);
+    const isUnchanged = (templates[editing] ?? event?.default_template) === draftTpl;
+    if (isUnchanged) { setEditing(null); return; }
+
+    // If draftTpl matches the default exactly, treat as a reset (drop the override).
+    const newTemplates = { ...templates };
+    if (event && draftTpl.trim() === event.default_template.trim()) {
+      delete newTemplates[editing];
+    } else {
+      newTemplates[editing] = draftTpl;
+    }
+
+    setSavingTpl(true);
+    try {
+      await api.patch("/admin/config", { tg_templates: newTemplates });
+      setTemplates(newTemplates);
+      setEditing(null);
+      toast.success("Template saved");
+    } catch (err) {
+      toast.error("Save failed", { description: err?.response?.data?.detail || err?.message });
+    } finally {
+      setSavingTpl(false);
+    }
+  };
+
+  const resetTemplate = async (name) => {
+    const next = { ...templates };
+    delete next[name];
+    setSavingTpl(true);
+    try {
+      await api.patch("/admin/config", { tg_templates: next });
+      setTemplates(next);
+      if (editing === name) setEditing(null);
+      toast.success("Reverted to default");
+    } catch (err) {
+      toast.error("Reset failed", { description: err?.response?.data?.detail || err?.message });
+    } finally {
+      setSavingTpl(false);
+    }
+  };
+
+  const sendCustom = async () => {
+    if (!customMsg.trim()) {
+      toast.error("Type a message first");
+      return;
+    }
+    setSending(true);
+    try {
+      await api.post("/admin/telegram/send", { message: customMsg, parse_mode: "Markdown" });
+      toast.success("Message sent");
+      setCustomMsg("");
+    } catch (err) {
+      toast.error("Send failed", { description: err?.response?.data?.detail || err?.message });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <section className="bg-obsidian-900/40 border border-white/5 rounded-sm p-7 mb-8" data-testid="tg-bot-section">
+      <SectionHeader
+        icon={MessageSquare}
+        title="Telegram Bot"
+        description="Pause auto-announcements, edit per-event templates, or send a one-off message right now."
+      />
+      {loading ? (
+        <div className="text-sm text-white/40 font-mono">Loading…</div>
+      ) : (
+        <>
+          {/* Master switch */}
+          <div className="flex items-center justify-between p-4 rounded-sm border border-white/10 bg-obsidian-950/40 mb-6">
+            <div>
+              <div className="text-sm text-white font-medium flex items-center gap-2">
+                <Power className="w-4 h-4" style={{ color: enabled ? ACCENT : "#ffffff60" }} />
+                Auto-announcements
+              </div>
+              <div className="text-xs text-white/45 mt-0.5">
+                Master switch. When off, no scheduled events will post to Telegram (manual sends below still work).
+              </div>
+            </div>
+            <button
+              onClick={() => toggleEnabled(!enabled)}
+              disabled={savingToggles}
+              className="relative w-12 h-6 rounded-full transition-colors flex-shrink-0"
+              style={{ backgroundColor: enabled ? ACCENT : "#ffffff20" }}
+              aria-label="Toggle announcements"
+            >
+              <span
+                className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+                style={{ left: enabled ? "calc(100% - 22px)" : "2px" }}
+              />
+            </button>
+          </div>
+
+          {/* Per-event toggle list + edit buttons */}
+          <div className="mb-8">
+            <div className="text-[10px] uppercase tracking-[0.25em] font-mono text-white/45 mb-3">Events</div>
+            <div className="border border-white/5 rounded-sm divide-y divide-white/5">
+              {events.map((e) => {
+                const isDisabled = disabledSet.has(e.name);
+                const hasOverride = templates[e.name] !== undefined;
+                return (
+                  <div key={e.name} className="px-4 py-3 flex items-center gap-3">
+                    <button
+                      onClick={() => toggleEvent(e.name)}
+                      disabled={savingToggles}
+                      className="relative w-10 h-5 rounded-full transition-colors flex-shrink-0"
+                      style={{ backgroundColor: !isDisabled ? ACCENT : "#ffffff15" }}
+                      aria-label={`Toggle ${e.name}`}
+                    >
+                      <span
+                        className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                        style={{ left: !isDisabled ? "calc(100% - 18px)" : "2px" }}
+                      />
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-white truncate">
+                        {e.label}
+                        {hasOverride && (
+                          <span
+                            className="ml-2 px-1.5 py-0.5 rounded-sm text-[9px] uppercase tracking-widest font-mono"
+                            style={{ backgroundColor: `${ACCENT}20`, color: ACCENT }}
+                          >
+                            custom
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] font-mono text-white/35 truncate">{e.name}</div>
+                    </div>
+                    <Button
+                      onClick={() => startEditing(e)}
+                      variant="outline"
+                      className="border-white/10 bg-transparent text-white/70 hover:bg-white/5 h-8 px-3 font-mono text-[10px] uppercase tracking-widest rounded-sm"
+                    >
+                      <Pen className="w-3 h-3 mr-1.5" /> Edit
+                    </Button>
+                    {hasOverride && (
+                      <Button
+                        onClick={() => resetTemplate(e.name)}
+                        disabled={savingTpl}
+                        variant="outline"
+                        className="border-white/10 bg-transparent text-white/50 hover:text-crimson hover:border-crimson/40 h-8 px-2 font-mono text-[10px] uppercase tracking-widest rounded-sm"
+                        aria-label="Reset to default"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Template editor (inline panel) */}
+          {editing && (() => {
+            const event = events.find((e) => e.name === editing);
+            if (!event) return null;
+            return (
+              <div className="mb-8 border border-gold/30 rounded-sm p-5 bg-gold/[0.03]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-1" style={{ color: ACCENT }}>
+                      Editing template
+                    </div>
+                    <div className="text-sm text-white">{event.label} <span className="text-white/35 font-mono text-xs">· {event.name}</span></div>
+                  </div>
+                  <Button
+                    onClick={() => setEditing(null)}
+                    variant="ghost"
+                    className="text-white/50 hover:text-white h-8 px-3 font-mono text-[10px] uppercase tracking-widest rounded-sm"
+                  >
+                    Discard
+                  </Button>
+                </div>
+                <textarea
+                  value={draftTpl}
+                  onChange={(e) => setDraftTpl(e.target.value)}
+                  rows={10}
+                  className="w-full bg-obsidian-950/80 border border-white/10 text-white font-mono text-xs rounded-sm p-3 focus:outline-none focus:border-gold/40"
+                  data-testid="tg-template-editor"
+                />
+                <div className="mt-2 text-[11px] font-mono text-white/40">
+                  Placeholders: {event.vars.map((v) => (
+                    <code key={v} className="mx-1 px-1 py-0.5 rounded bg-white/5 text-white/60">{`{${v}}`}</code>
+                  ))}
+                </div>
+                <div className="mt-2 text-[10px] font-mono text-white/30">
+                  Markdown supported. Use <code className="text-white/50">\\*</code>, <code className="text-white/50">\\_</code>, <code className="text-white/50">\\#</code>, etc. to escape literals. Empty / matching default = revert.
+                </div>
+                <div className="mt-4 flex items-center justify-end gap-3">
+                  <Button
+                    onClick={() => setDraftTpl(event.default_template)}
+                    variant="outline"
+                    className="border-white/15 bg-transparent text-white h-9 px-4 font-mono text-[11px] uppercase tracking-widest rounded-sm"
+                  >
+                    <RotateCcw className="w-3 h-3 mr-1.5" /> Load default
+                  </Button>
+                  <Button
+                    onClick={saveTemplate}
+                    disabled={savingTpl}
+                    className="bg-gold text-obsidian-950 hover:bg-gold-hover font-bold uppercase tracking-widest text-xs rounded-sm h-9 px-5"
+                  >
+                    <Save className="w-3.5 h-3.5 mr-1.5" />
+                    {savingTpl ? "Saving…" : "Save Template"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Custom message sender */}
+          <div className="border border-white/10 rounded-sm p-5 bg-obsidian-950/40">
+            <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-3" style={{ color: ACCENT }}>
+              Send Custom Message
+            </div>
+            <textarea
+              value={customMsg}
+              onChange={(e) => setCustomMsg(e.target.value)}
+              rows={5}
+              placeholder={"Type a one-off announcement…\nMarkdown is supported. Bypasses all toggles."}
+              className="w-full bg-obsidian-950/80 border border-white/10 text-white font-mono text-sm rounded-sm p-3 focus:outline-none focus:border-gold/40 placeholder:text-white/25"
+              data-testid="tg-custom-message"
+            />
+            <div className="mt-3 flex items-center justify-between">
+              <div className="text-[11px] font-mono text-white/35">{customMsg.length} chars · max 4096</div>
+              <Button
+                onClick={sendCustom}
+                disabled={sending || !customMsg.trim() || customMsg.length > 4096}
+                className="bg-gold text-obsidian-950 hover:bg-gold-hover font-bold uppercase tracking-widest text-xs rounded-sm h-10 px-5"
+                data-testid="tg-send-custom"
+              >
+                <Send className="w-3.5 h-3.5 mr-1.5" />
+                {sending ? "Sending…" : "Send Now"}
+              </Button>
+            </div>
+          </div>
+        </>
       )}
     </section>
   );

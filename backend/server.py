@@ -61,6 +61,10 @@ from telegram_bot import (
     announce_daily_spin_reminder,
     announce_rollover,
     announce_buy_cta,
+    set_runtime_config_getter as set_tg_runtime_config_getter,
+    list_events as tg_list_events,
+    send_custom as tg_send_custom,
+    EVENT_DEFAULTS,
 )
 from onchain import (
     fetch_token_market_data,
@@ -441,6 +445,13 @@ def _runtime_defaults() -> dict:
         "streak_month_threshold": 30,
         "streak_grace_days": 1,
         "max_bonus_tickets": 10,
+        # Telegram bot — runtime-tunable announcement controls.
+        # `tg_announcements_enabled` is the master kill switch.
+        # `tg_event_disabled` is a list of event names (see telegram_bot.EVENT_DEFAULTS) to skip.
+        # `tg_templates` overrides the default per-event Markdown template, keyed by event name.
+        "tg_announcements_enabled": True,
+        "tg_event_disabled": [],
+        "tg_templates": {},
     }
 
 
@@ -482,6 +493,14 @@ async def get_runtime_config(force_refresh: bool = False) -> dict:
             cfg["streak_grace_days"] = int(doc["streak_grace_days"])
         if "max_bonus_tickets" in doc and doc["max_bonus_tickets"] is not None:
             cfg["max_bonus_tickets"] = int(doc["max_bonus_tickets"])
+        if "tg_announcements_enabled" in doc:
+            cfg["tg_announcements_enabled"] = bool(doc["tg_announcements_enabled"])
+        if "tg_event_disabled" in doc and isinstance(doc["tg_event_disabled"], list):
+            cfg["tg_event_disabled"] = [str(s) for s in doc["tg_event_disabled"]]
+        if "tg_templates" in doc and isinstance(doc["tg_templates"], dict):
+            cfg["tg_templates"] = {
+                str(k): str(v) for k, v in doc["tg_templates"].items() if isinstance(v, str)
+            }
         cfg["updated_at"] = doc.get("updated_at")
         cfg["updated_by"] = doc.get("updated_by")
 
@@ -570,6 +589,10 @@ async def on_startup():
 
     streak_store = StreakStore(_get_col("holder_streaks"))
     await streak_store.ensure_indexes()
+
+    # Let telegram_bot read the live runtime config (toggles + custom
+    # templates) without creating an import cycle.
+    set_tg_runtime_config_getter(get_runtime_config)
 
     winners_col = _get_col("winners")
     spin_col = _get_col("spin_state")
@@ -985,6 +1008,60 @@ async def admin_patch_config(payload: dict, admin: str = Depends(get_admin_walle
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="streak_grace_days must be 0 or 1")
 
+    # ---- Telegram bot controls ----
+    if "tg_announcements_enabled" in payload:
+        update["tg_announcements_enabled"] = bool(payload["tg_announcements_enabled"])
+
+    if "tg_event_disabled" in payload:
+        raw = payload["tg_event_disabled"]
+        if not isinstance(raw, list):
+            raise HTTPException(status_code=400, detail="tg_event_disabled must be a list of event names")
+        valid_names = set(EVENT_DEFAULTS.keys())
+        cleaned_events: list[str] = []
+        seen_e: set[str] = set()
+        for name in raw:
+            if not isinstance(name, str):
+                raise HTTPException(status_code=400, detail="tg_event_disabled entries must be strings")
+            n = name.strip()
+            if not n or n in seen_e:
+                continue
+            if n not in valid_names:
+                raise HTTPException(status_code=400, detail=f"Unknown TG event: {n}")
+            seen_e.add(n)
+            cleaned_events.append(n)
+        update["tg_event_disabled"] = cleaned_events
+
+    if "tg_templates" in payload:
+        raw = payload["tg_templates"]
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=400, detail="tg_templates must be an object")
+        valid_names = set(EVENT_DEFAULTS.keys())
+        cleaned_tpls: dict[str, str] = {}
+        for k, v in raw.items():
+            if not isinstance(k, str) or k not in valid_names:
+                raise HTTPException(status_code=400, detail=f"Unknown TG event template: {k}")
+            if v is None or (isinstance(v, str) and not v.strip()):
+                # treat empty/null as "revert to default" — drop the override.
+                continue
+            if not isinstance(v, str):
+                raise HTTPException(status_code=400, detail=f"Template for {k} must be a string")
+            if len(v) > 4096:
+                raise HTTPException(status_code=400, detail=f"Template for {k} too long (Telegram limit ~4096 chars)")
+            # Validate the template by rendering with mock placeholders so a
+            # missing/typo'd {var} fails at PATCH time rather than send time.
+            mock = {var: f"<{var}>" for var in EVENT_DEFAULTS[k]["vars"]}
+            try:
+                v.format(**mock)
+            except (KeyError, IndexError) as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Template for {k} references unknown placeholder: {exc}",
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Template for {k} is invalid: {exc}")
+            cleaned_tpls[k] = v
+        update["tg_templates"] = cleaned_tpls
+
     if not update:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
@@ -1032,6 +1109,37 @@ async def admin_capture_snapshot(admin: str = Depends(get_admin_wallet)):
         "total_holders": doc["total_holders"],
         "mint": doc.get("mint"),
     }
+
+
+# ---------- Telegram bot admin controls ----------
+
+@api_router.get("/admin/telegram/events")
+async def admin_tg_events(admin: str = Depends(get_admin_wallet)):
+    """List every announceable event (name, default template, placeholders).
+    Used by the SystemAdmin page to render the toggle list and template editor."""
+    return {"events": tg_list_events()}
+
+
+class TelegramSendRequest(BaseModel):
+    message: str
+    parse_mode: Optional[str] = "Markdown"  # set to None / "" to send plain text
+
+
+@api_router.post("/admin/telegram/send")
+async def admin_tg_send(req: TelegramSendRequest, admin: str = Depends(get_admin_wallet)):
+    """Admin-only: send a free-text message to the configured TG chat now.
+    Bypasses the auto-announcement toggles — this is a manual broadcast.
+    Returns the underlying send result so the UI can surface failures."""
+    parse_mode = req.parse_mode if (req.parse_mode and req.parse_mode.strip()) else None
+    if parse_mode and parse_mode not in ("Markdown", "MarkdownV2", "HTML"):
+        raise HTTPException(status_code=400, detail="parse_mode must be Markdown, MarkdownV2, HTML, or empty")
+    result = await tg_send_custom(req.message, parse_mode=parse_mode or "")
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=502,
+            detail=result.get("error") or "Telegram send failed (see server logs)",
+        )
+    return result
 
 
 def _is_valid_solana_address(addr: str) -> bool:
