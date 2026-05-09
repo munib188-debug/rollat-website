@@ -4,6 +4,7 @@ import { Gift, Sparkles, Trophy, Clock, ExternalLink, Copy, Twitter, Skull } fro
 import { useDevRoll } from "@/lib/useDevRoll";
 import { useCountdown, pad } from "@/lib/useCountdown";
 import { launchConfetti } from "@/lib/confetti";
+import LastTeamStanding from "./LastTeamStanding";
 
 // Crimson is the dev-roll signature color so it doesn't read as a duplicate of
 // the gold main wheel.
@@ -132,22 +133,29 @@ export default function DevRollArena() {
               <EmptyState />
             </motion.div>
           )}
-          {roll && phase === "scheduled" && (
+          {/* Last Team Standing tournament — own self-contained UX across
+              scheduled / spinning / resolved phases. */}
+          {roll && roll.is_tournament && (
+            <motion.div key="tournament" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+              <LastTeamStanding roll={roll} />
+            </motion.div>
+          )}
+          {roll && !roll.is_tournament && phase === "scheduled" && (
             <motion.div key="scheduled" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <ScheduledView roll={roll} />
             </motion.div>
           )}
-          {roll && phase === "spinning" && roll.mode === "elimination" && (
+          {roll && !roll.is_tournament && phase === "spinning" && roll.mode === "elimination" && (
             <motion.div key="elimination" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <EliminationView roll={roll} />
             </motion.div>
           )}
-          {roll && phase === "spinning" && roll.mode !== "elimination" && (
+          {roll && !roll.is_tournament && phase === "spinning" && roll.mode !== "elimination" && (
             <motion.div key="spinning" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <SpinningView roll={roll} />
             </motion.div>
           )}
-          {roll && phase === "resolved" && (
+          {roll && !roll.is_tournament && phase === "resolved" && (
             <motion.div key="resolved" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <ResolvedView roll={roll} />
             </motion.div>

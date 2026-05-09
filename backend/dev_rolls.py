@@ -36,6 +36,9 @@ from telegram_bot import (
     announce_dev_roll_winner,
     announce_dev_roll_reminder,
     announce_buy_cta,
+    announce_tournament_signups_open,
+    announce_tournament_team_eliminated,
+    announce_tournament_resolved,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,6 +71,21 @@ MAX_TOTAL_IMAGE_BYTES = 12_000_000 # leaves ~4 MB headroom under BSON 16 MB
 MAX_NAME_LEN = 60
 
 _DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$")
+
+# Last Team Standing: tournaments must have at least 3 and at most 20 teams.
+MIN_TOURNAMENT_TEAMS = 3
+MAX_TOURNAMENT_TEAMS = 20
+
+# Optional injection of the TournamentStore from server.py (avoids an import
+# cycle). Set via `set_tournament_store()` at app startup.
+_tournament_store = None
+
+
+def set_tournament_store(store) -> None:
+    """server.py calls this at startup so the scheduler can bulk-eliminate
+    supporters when a team falls. Stays None for unit tests / cold paths."""
+    global _tournament_store
+    _tournament_store = store
 
 
 # ---------- model ----------
@@ -103,6 +121,14 @@ class DevRoll(BaseModel):
     entry_type: Literal["wallet", "custom"] = "wallet"
     mode: Literal["single", "elimination"] = "single"
     elimination_interval_secs: Optional[int] = None  # required when mode == "elimination"
+
+    # Last Team Standing flag — turns an elimination + custom roll into a
+    # community tournament where supporters sign up to back a team and
+    # share the pot when their team survives. See tournaments.py.
+    is_tournament: bool = False
+    # Populated on resolve when is_tournament=True. Frontend reads this for
+    # the supporter list + per-wallet share. Never set on non-tournament rolls.
+    tournament_payout: Optional[dict] = None
 
     entries: List[RollEntry] = Field(default_factory=list)
     survivors: List[str] = Field(default_factory=list)        # entry IDs still in
@@ -248,20 +274,54 @@ def validate_entries(raw_entries: List[dict], entry_type: str) -> List[RollEntry
     return cleaned
 
 
+_DT_FIELDS = (
+    "scheduled_at", "spin_started_at", "resolved_at",
+    "cancelled_at", "created_at", "next_elimination_at",
+)
+
+
+def _patch_tz(doc: dict) -> dict:
+    """Mongo (Motor without `tz_aware=True`) returns datetimes as tz-naive.
+    Pydantic v2's `model_dump(mode="json")` then emits them as ISO strings
+    WITHOUT a timezone marker — and JS `new Date(...)` parses tz-less ISO
+    strings as **local time**, which makes the public countdown stick at
+    00:00 for any user not in UTC.
+
+    We pre-patch every datetime field on the doc to be tz-aware UTC so the
+    serialized output carries `+00:00`."""
+    out = dict(doc)
+    for k in _DT_FIELDS:
+        v = out.get(k)
+        if isinstance(v, datetime) and v.tzinfo is None:
+            out[k] = v.replace(tzinfo=timezone.utc)
+    if isinstance(out.get("eliminated"), list):
+        patched_events = []
+        for ev in out["eliminated"]:
+            if isinstance(ev, dict):
+                ev = dict(ev)
+                ts = ev.get("eliminated_at")
+                if isinstance(ts, datetime) and ts.tzinfo is None:
+                    ev["eliminated_at"] = ts.replace(tzinfo=timezone.utc)
+            patched_events.append(ev)
+        out["eliminated"] = patched_events
+    return out
+
+
 def _normalize_doc(doc: Optional[dict], *, strip_images: bool = False) -> Optional[dict]:
-    """Strip Mongo's `_id`, run the legacy migrator (so old rows return the
-    new shape), and coerce datetimes to ISO strings for JSON output. When
-    `strip_images=True`, drop heavy `image_data_url` fields from entries —
-    used for history list responses."""
+    """Strip Mongo's `_id`, run the legacy migrator, ensure all datetime
+    fields are tz-aware UTC (so the JSON response emits a timezone marker),
+    and coerce datetimes to ISO strings via Pydantic. When `strip_images=True`,
+    drop heavy `image_data_url` fields from entries (used for history list
+    responses)."""
     if not doc:
         return None
+    patched = _patch_tz(doc)
     try:
-        roll = DevRoll.model_validate(doc)
+        roll = DevRoll.model_validate(patched)
     except Exception:
         # Fall back to a raw dump if a doc somehow can't be migrated.
-        out = {k: v for k, v in doc.items() if k != "_id"}
-        for k in ("scheduled_at", "spin_started_at", "resolved_at", "cancelled_at",
-                  "created_at", "next_elimination_at"):
+        out = {k: v for k, v in patched.items() if k != "_id"}
+        for k in _DT_FIELDS:
             v = out.get(k)
             if isinstance(v, datetime):
                 out[k] = _ensure_utc(v).isoformat()
@@ -315,6 +375,7 @@ async def create_dev_roll(
     pot_sol: float,
     scheduled_at: datetime,
     created_by: str,
+    is_tournament: bool = False,
 ) -> dict:
     if entry_type not in ("wallet", "custom"):
         raise HTTPException(status_code=400, detail="entry_type must be 'wallet' or 'custom'")
@@ -332,6 +393,27 @@ async def create_dev_roll(
         elimination_interval_secs = _validate_interval(elimination_interval_secs)
     else:
         elimination_interval_secs = None  # ignore for single-mode
+
+    # Last Team Standing tournaments layer extra constraints on top of
+    # elimination + custom rolls.
+    if is_tournament:
+        if mode != "elimination":
+            raise HTTPException(status_code=400, detail="Last Team Standing requires elimination mode")
+        if entry_type != "custom":
+            raise HTTPException(status_code=400, detail="Last Team Standing requires custom (name+photo) entries")
+        if not (MIN_TOURNAMENT_TEAMS <= len(cleaned_entries) <= MAX_TOURNAMENT_TEAMS):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Last Team Standing needs {MIN_TOURNAMENT_TEAMS}–{MAX_TOURNAMENT_TEAMS} teams",
+            )
+        # Team names must be unique (case-insensitive) so supporters can
+        # identify their pick unambiguously.
+        seen_names: set[str] = set()
+        for e in cleaned_entries:
+            n = (e.name or "").strip().lower()
+            if n in seen_names:
+                raise HTTPException(status_code=400, detail=f"duplicate team name: {e.name}")
+            seen_names.add(n)
 
     try:
         pot_value = float(pot_sol)
@@ -353,6 +435,7 @@ async def create_dev_roll(
         entry_type=entry_type,
         mode=mode,
         elimination_interval_secs=elimination_interval_secs,
+        is_tournament=bool(is_tournament),
         entries=cleaned_entries,
         pot_sol=pot_value,
         scheduled_at=sched,
@@ -367,6 +450,14 @@ async def create_dev_roll(
         wallet_count=len(cleaned_entries),
         scheduled_at_iso=normalized.get("scheduled_at", ""),
     ))
+    if is_tournament:
+        asyncio.create_task(announce_tournament_signups_open(
+            title=title,
+            pot_sol=pot_value,
+            team_count=len(cleaned_entries),
+            scheduled_at_iso=normalized.get("scheduled_at", ""),
+            roll_id=normalized.get("id", ""),
+        ))
     return normalized
 
 
@@ -644,17 +735,57 @@ async def _tick_elimination_roll(col, roll_doc: dict) -> None:
         # Final elimination — winner emerges.
         winner_id = new_survivors[0]
         winner_entry = next((e for e in roll.entries if e.id == winner_id), None)
-        update = {
-            "$set": {
-                "survivors": new_survivors,
-                "phase": "resolved",
-                "winner_entry_id": winner_id,
-                "winner": _entry_label(winner_entry) if winner_entry else None,
-                "resolved_at": now,
-                "next_elimination_at": None,
-            },
-            "$push": {"eliminated": elim_event},
+
+        # Tournament payout: pre-compute supporter shares so the public
+        # reveal page can render without a second round-trip.
+        tournament_payout: Optional[dict] = None
+        if roll.is_tournament and _tournament_store is not None:
+            try:
+                # Mark the final loser's supporters too (consistent with the
+                # per-tick path below).
+                await _tournament_store.eliminate_team_supporters(
+                    roll_id=roll_id, team_entry_id=loser_id, when=now,
+                )
+                survivors_docs = await _tournament_store.list_supporters(
+                    roll_id, only_alive=True,
+                )
+                # Sanity: only count supporters who actually backed the
+                # winning team.
+                winners = [
+                    s for s in survivors_docs
+                    if s.get("team_entry_id") == winner_id
+                ]
+                count = len(winners)
+                share = (float(roll.pot_sol) / count) if count > 0 else 0.0
+                tournament_payout = {
+                    "winning_team_entry_id": winner_id,
+                    "supporter_count": count,
+                    "share_sol": round(share, 6),
+                    "total_share_sol": round(share * count, 6),
+                    "supporters": [
+                        {
+                            "wallet": s["wallet"],
+                            "x_handle": s.get("x_handle", ""),
+                            "share_sol": round(share, 6),
+                        }
+                        for s in winners
+                    ],
+                }
+            except Exception:
+                logger.exception(f"[dev_roll] tournament payout calc failed for {roll_id}")
+
+        update_set = {
+            "survivors": new_survivors,
+            "phase": "resolved",
+            "winner_entry_id": winner_id,
+            "winner": _entry_label(winner_entry) if winner_entry else None,
+            "resolved_at": now,
+            "next_elimination_at": None,
         }
+        if tournament_payout is not None:
+            update_set["tournament_payout"] = tournament_payout
+
+        update = {"$set": update_set, "$push": {"eliminated": elim_event}}
         result = await col.update_one(
             {"id": roll_id, "phase": "spinning", "mode": "elimination",
              "next_elimination_at": roll.next_elimination_at},
@@ -667,12 +798,21 @@ async def _tick_elimination_roll(col, roll_doc: dict) -> None:
             f"{_entry_label(winner_entry) if winner_entry else winner_id}"
         )
         if winner_entry:
-            asyncio.create_task(announce_dev_roll_winner(
-                title=roll.title,
-                winner_wallet=winner_entry.wallet or _entry_label(winner_entry),
-                pot_sol=roll.pot_sol,
-                is_wallet=bool(winner_entry.wallet),
-            ))
+            if roll.is_tournament:
+                asyncio.create_task(announce_tournament_resolved(
+                    title=roll.title,
+                    team_name=winner_entry.name or _entry_label(winner_entry),
+                    pot_sol=roll.pot_sol,
+                    supporter_count=(tournament_payout or {}).get("supporter_count", 0),
+                    share_sol=(tournament_payout or {}).get("share_sol", 0.0),
+                ))
+            else:
+                asyncio.create_task(announce_dev_roll_winner(
+                    title=roll.title,
+                    winner_wallet=winner_entry.wallet or _entry_label(winner_entry),
+                    pot_sol=roll.pot_sol,
+                    is_wallet=bool(winner_entry.wallet),
+                ))
             asyncio.create_task(announce_buy_cta())
     else:
         update = {
@@ -693,6 +833,27 @@ async def _tick_elimination_roll(col, roll_doc: dict) -> None:
             f"[dev_roll] elimination tick {roll_id}: "
             f"{len(roll.survivors)} -> {len(new_survivors)} (out: {loser_id[:8]})"
         )
+
+        # Tournament: bulk-eliminate the supporters of the team that just fell
+        # and announce on Telegram. Best-effort — failures don't stall the
+        # scheduler.
+        if roll.is_tournament:
+            loser_entry = next((e for e in roll.entries if e.id == loser_id), None)
+            loser_name = (loser_entry.name if loser_entry else "(unknown)") or "(unknown)"
+            if _tournament_store is not None:
+                try:
+                    await _tournament_store.eliminate_team_supporters(
+                        roll_id=roll_id, team_entry_id=loser_id, when=now,
+                    )
+                except Exception:
+                    logger.exception(f"[dev_roll] supporter elim failed for {roll_id}")
+            asyncio.create_task(announce_tournament_team_eliminated(
+                title=roll.title,
+                team_name=loser_name,
+                position=elim_event["position"],
+                remaining=len(new_survivors),
+                pot_sol=roll.pot_sol,
+            ))
 
 
 async def _finalize_winner(col, roll: DevRoll, winner_id: str, now: datetime) -> None:

@@ -219,6 +219,39 @@ EVENT_DEFAULTS: dict[str, dict[str, Any]] = {
             "📊 {site} · 🐦 @Rollat\\_online"
         ),
     },
+    # ── Last Team Standing tournament events ──
+    "tournament_signups_open": {
+        "label": "Tournament — Sign-ups open",
+        "vars": ["title", "pot_sol", "team_count", "time_str", "roll_id", "site"],
+        "template": (
+            "🚨 *Last Team Standing — Sign-ups Open*\n"
+            "🎯 {title}\n"
+            "🏟️ {team_count} teams enter · 1 survives\n"
+            "💰 Pot: `{pot_sol} SOL` (split among the winning team's supporters)\n"
+            "⏰ Wheel starts: `{time_str}`\n\n"
+            "Pick your team → {site}/#dev-roll"
+        ),
+    },
+    "tournament_team_eliminated": {
+        "label": "Tournament — Team eliminated",
+        "vars": ["title", "team_name", "position", "remaining", "pot_sol", "site"],
+        "template": (
+            "💀 *{team_name} — Eliminated*\n"
+            "🪦 Position: \\#{position} · {remaining} team(s) remaining\n"
+            "💰 Pot still on the line: `{pot_sol} SOL`\n\n"
+            "{site}/#dev-roll"
+        ),
+    },
+    "tournament_resolved": {
+        "label": "Tournament — Last team standing",
+        "vars": ["title", "team_name", "pot_sol", "supporter_count", "share_sol", "site"],
+        "template": (
+            "🏆 *LAST TEAM STANDING — {team_name}*\n"
+            "👥 {supporter_count} supporters split `{pot_sol} SOL`\n"
+            "💸 ≈ `{share_sol} SOL` each\n\n"
+            "{site}/#dev-roll"
+        ),
+    },
 }
 
 
@@ -486,6 +519,54 @@ async def announce_guest_roll_winner(
         "guest_roll_winner",
         label=label, prize_label=prize_label, winner_name=winner_name,
         winner_ticker=winner_ticker, link_line=link_line, site=SITE,
+    )
+
+
+# ── Last Team Standing tournament ──────────────────────────────────────────
+
+async def announce_tournament_signups_open(
+    title: str | None,
+    pot_sol: float,
+    team_count: int,
+    scheduled_at_iso: str,
+    roll_id: str,
+) -> None:
+    label = title or "Last Team Standing"
+    time_str = scheduled_at_iso[:16].replace("T", " ") + " UTC" if scheduled_at_iso else "TBA"
+    await _emit(
+        "tournament_signups_open",
+        title=label, pot_sol=pot_sol, team_count=team_count,
+        time_str=time_str, roll_id=roll_id, site=SITE,
+    )
+
+
+async def announce_tournament_team_eliminated(
+    title: str | None,
+    team_name: str,
+    position: int,
+    remaining: int,
+    pot_sol: float,
+) -> None:
+    label = title or "Last Team Standing"
+    await _emit(
+        "tournament_team_eliminated",
+        title=label, team_name=team_name, position=position,
+        remaining=remaining, pot_sol=pot_sol, site=SITE,
+    )
+
+
+async def announce_tournament_resolved(
+    title: str | None,
+    team_name: str,
+    pot_sol: float,
+    supporter_count: int,
+    share_sol: float,
+) -> None:
+    label = title or "Last Team Standing"
+    await _emit(
+        "tournament_resolved",
+        title=label, team_name=team_name, pot_sol=pot_sol,
+        supporter_count=supporter_count, share_sol=share_sol, site=SITE,
     )
 
 

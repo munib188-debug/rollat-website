@@ -42,7 +42,9 @@ from dev_rolls import (
     fetch_dev_roll,
     list_dev_rolls,
     dev_scheduler_loop,
+    set_tournament_store as set_dev_rolls_tournament_store,
 )
+from tournaments import TournamentStore, _normalize_x_handle
 from guest_rolls import (
     create_guest_roll,
     update_guest_roll,
@@ -517,6 +519,7 @@ def _invalidate_runtime_cfg_cache() -> None:
 nonce_store: Optional[NonceStore] = None
 snapshot_store: Optional[SnapshotStore] = None
 streak_store: Optional[StreakStore] = None
+tournament_store: Optional[TournamentStore] = None
 
 
 async def daily_reminder_loop() -> None:
@@ -548,7 +551,7 @@ async def daily_reminder_loop() -> None:
 
 @app.on_event("startup")
 async def on_startup():
-    global USE_MONGO, nonce_store, snapshot_store, streak_store
+    global USE_MONGO, nonce_store, snapshot_store, streak_store, tournament_store
 
     # Fail fast if JWT_SECRET is missing or too short — auth cannot work safely without it.
     from auth import JWT_SECRET as _jwt_secret
@@ -589,6 +592,12 @@ async def on_startup():
 
     streak_store = StreakStore(_get_col("holder_streaks"))
     await streak_store.ensure_indexes()
+
+    # Tournament (Last Team Standing) supporter store — injected into
+    # dev_rolls.py via setter to avoid an import cycle.
+    tournament_store = TournamentStore(_get_col("tournament_supporters"))
+    await tournament_store.ensure_indexes()
+    set_dev_rolls_tournament_store(tournament_store)
 
     # Let telegram_bot read the live runtime config (toggles + custom
     # templates) without creating an import cycle.
@@ -1606,6 +1615,9 @@ class DevRollCreateRequest(BaseModel):
     wallets: Optional[List[str]] = None
     pot_sol: float
     scheduled_at: str            # ISO 8601 with timezone
+    # Last Team Standing tournament: requires entry_type=custom + mode=elimination.
+    # When True, public users can sign up to back a team.
+    is_tournament: bool = False
 
 
 class DevRollUpdateRequest(BaseModel):
@@ -1656,6 +1668,7 @@ async def dev_roll_create(req: DevRollCreateRequest, admin: str = Depends(get_ad
         pot_sol=req.pot_sol,
         scheduled_at=sched,
         created_by=admin,
+        is_tournament=req.is_tournament,
     )
 
 
@@ -1700,6 +1713,94 @@ async def dev_roll_cancel(roll_id: str, admin: str = Depends(get_admin_wallet)):
 @api_router.get("/dev/rolls")
 async def dev_rolls_history(admin: str = Depends(get_admin_wallet)):
     return await list_dev_rolls(_get_col("dev_rolls"), limit=50)
+
+
+# ---------- Last Team Standing tournament sign-ups (public) ----------
+
+class TournamentSignupRequest(BaseModel):
+    team_entry_id: str
+    wallet: str
+    x_handle: str
+
+
+@api_router.post("/dev/roll/{roll_id}/support")
+async def tournament_signup(roll_id: str, req: TournamentSignupRequest):
+    """Public — back a team in a Last Team Standing tournament. One sign-up
+    per wallet per roll. Sign-ups close once the wheel starts (phase != 'scheduled')."""
+    if tournament_store is None:
+        raise HTTPException(status_code=503, detail="tournament store not initialized")
+
+    roll_doc = await fetch_dev_roll(_get_col("dev_rolls"), roll_id)
+    if not roll_doc:
+        raise HTTPException(status_code=404, detail="roll not found")
+    if not roll_doc.get("is_tournament"):
+        raise HTTPException(status_code=400, detail="this roll is not a tournament")
+    if roll_doc.get("phase") != "scheduled":
+        raise HTTPException(status_code=410, detail="sign-ups are closed for this tournament")
+
+    wallet = (req.wallet or "").strip()
+    if not _is_valid_solana_address(wallet):
+        raise HTTPException(status_code=400, detail="invalid Solana wallet address")
+    handle = _normalize_x_handle(req.x_handle)
+
+    team_ids = {e.get("id") for e in (roll_doc.get("entries") or [])}
+    if req.team_entry_id not in team_ids:
+        raise HTTPException(status_code=400, detail="team_entry_id is not a team in this roll")
+
+    await tournament_store.add_supporter(
+        roll_id=roll_id,
+        team_entry_id=req.team_entry_id,
+        wallet=wallet,
+        x_handle=handle,
+    )
+    counts = await tournament_store.supporters_by_team(roll_id)
+    return {
+        "team_entry_id": req.team_entry_id,
+        "supporter_count": counts.get(req.team_entry_id, 0),
+        "x_handle": handle,
+    }
+
+
+@api_router.get("/dev/roll/{roll_id}/supporters")
+async def tournament_supporters(roll_id: str, wallet: Optional[str] = None):
+    """Public — supporter counts per team + the caller's own sign-up record
+    (resolved by ?wallet=... query). No auth — counts are public marketing.
+    Wallets/x_handles are NOT included in the counts payload."""
+    if tournament_store is None:
+        raise HTTPException(status_code=503, detail="tournament store not initialized")
+    roll_doc = await fetch_dev_roll(_get_col("dev_rolls"), roll_id)
+    if not roll_doc:
+        raise HTTPException(status_code=404, detail="roll not found")
+
+    counts = await tournament_store.supporters_by_team(roll_id)
+    teams = [
+        {"team_entry_id": eid, "supporter_count": int(counts.get(eid, 0))}
+        for eid in (e.get("id") for e in (roll_doc.get("entries") or []))
+    ]
+    my = None
+    if wallet:
+        w = wallet.strip()
+        if _is_valid_solana_address(w):
+            doc = await tournament_store.supporter_for_wallet(roll_id=roll_id, wallet=w)
+            if doc:
+                my = {
+                    "team_entry_id": doc.get("team_entry_id"),
+                    "x_handle": doc.get("x_handle"),
+                    "eliminated": bool(doc.get("eliminated")),
+                }
+    return {"teams": teams, "my": my, "total": sum(t["supporter_count"] for t in teams)}
+
+
+@api_router.delete("/dev/roll/{roll_id}/support/{wallet}")
+async def tournament_remove_supporter(
+    roll_id: str, wallet: str, admin: str = Depends(get_admin_wallet)
+):
+    if tournament_store is None:
+        raise HTTPException(status_code=503, detail="tournament store not initialized")
+    ok = await tournament_store.remove_supporter(roll_id=roll_id, wallet=wallet)
+    if not ok:
+        raise HTTPException(status_code=404, detail="supporter not found")
+    return {"removed": True}
 
 
 # ---------- Guest Roll routes ----------

@@ -91,6 +91,7 @@ export default function DevAdmin() {
   const [mode, setMode] = useState("single"); // "single" | "elimination"
   const [intervalValue, setIntervalValue] = useState("5");
   const [intervalUnit, setIntervalUnit] = useState("minutes");
+  const [isTournament, setIsTournament] = useState(false);
   const [schedMode, setSchedMode] = useState("timer");
   const [timerHours, setTimerHours] = useState("1");
   const [timerMinutes, setTimerMinutes] = useState("0");
@@ -140,6 +141,7 @@ export default function DevAdmin() {
     setMode("single");
     setIntervalValue("5");
     setIntervalUnit("minutes");
+    setIsTournament(false);
     setTimerHours("1");
     setTimerMinutes("0");
     setScheduledAt("");
@@ -171,6 +173,18 @@ export default function DevAdmin() {
       if (intervalSecs < 5) { toast.error("Interval must be at least 5 seconds"); return; }
     }
 
+    // Last Team Standing requires elimination + custom + 3-20 teams.
+    if (isTournament) {
+      if (mode !== "elimination" || entryType !== "custom") {
+        toast.error("Tournament needs Elimination mode + Custom entries");
+        return;
+      }
+      if (entriesPayload.length < 3 || entriesPayload.length > 20) {
+        toast.error("Tournament needs 3–20 teams");
+        return;
+      }
+    }
+
     let iso;
     if (schedMode === "timer") {
       const totalSecs = Math.max(0, parseInt(timerHours) || 0) * 3600 + Math.max(0, parseInt(timerMinutes) || 0) * 60;
@@ -191,6 +205,7 @@ export default function DevAdmin() {
         entries: entriesPayload,
         pot_sol: potNum,
         scheduled_at: iso,
+        is_tournament: isTournament,
       });
       toast.success("Dev roll scheduled");
       resetForm();
@@ -327,6 +342,7 @@ export default function DevAdmin() {
               mode={mode} setMode={setMode}
               intervalValue={intervalValue} setIntervalValue={setIntervalValue}
               intervalUnit={intervalUnit} setIntervalUnit={setIntervalUnit}
+              isTournament={isTournament} setIsTournament={setIsTournament}
               schedMode={schedMode} setSchedMode={setSchedMode}
               timerHours={timerHours} setTimerHours={setTimerHours}
               timerMinutes={timerMinutes} setTimerMinutes={setTimerMinutes}
@@ -372,6 +388,7 @@ function SetupForm({
   mode, setMode,
   intervalValue, setIntervalValue,
   intervalUnit, setIntervalUnit,
+  isTournament, setIsTournament,
   schedMode, setSchedMode,
   timerHours, setTimerHours,
   timerMinutes, setTimerMinutes,
@@ -492,6 +509,39 @@ function SetupForm({
                   <>Add at least 2 entries to estimate total duration.</>
                 )}
               </div>
+
+              {/* Last Team Standing tournament toggle — only meaningful when
+                  mode=elimination AND entry_type=custom. */}
+              {entryType === "custom" && (
+                <div className="col-span-2 mt-2 border border-crimson/30 rounded-sm p-3 bg-crimson/[0.04]">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!isTournament}
+                      onChange={(e) => setIsTournament(e.target.checked)}
+                      className="mt-1 accent-crimson"
+                      data-testid="dev-admin-is-tournament"
+                    />
+                    <div>
+                      <div className="text-[11px] uppercase tracking-widest font-mono text-crimson">
+                        Last Team Standing tournament
+                      </div>
+                      <div className="text-xs text-white/55 mt-1">
+                        Public sign-ups will open. Eliminating a team eliminates its supporters too.
+                        Pot splits among the surviving team's backers.
+                      </div>
+                      <div className="text-[10px] font-mono text-white/35 mt-1">
+                        Requires 3–20 teams (custom entries).
+                        {isTournament && (entryCount < 3 || entryCount > 20) && (
+                          <span className="text-crimson ml-1">
+                            · You currently have {entryCount} {entryCount === 1 ? "team" : "teams"}.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -874,11 +924,12 @@ function HistoryList({ history, loading }) {
       {history.map((r) => {
         const isWalletRoll = (r.entry_type || "wallet") === "wallet";
         const isElim = r.mode === "elimination";
+        const isTour = !!r.is_tournament;
         const winnerLabel = r.winner ? (isWalletRoll ? truncWallet(r.winner) : r.winner) : null;
         return (
           <div key={r.id} className="grid grid-cols-12 gap-3 px-6 py-3 border-b border-white/5 last:border-b-0 items-center text-sm">
             <div className="col-span-2 font-mono text-white/40 uppercase text-[10px] tracking-widest">
-              {r.phase}{isElim ? " · elim" : ""}
+              {r.phase}{isElim ? " · elim" : ""}{isTour ? " · tournament" : ""}
             </div>
             <div className="col-span-2 font-mono text-white/80">{fmtSol(r.pot_sol)}</div>
             <div className="col-span-2 font-mono text-white/55 text-xs">
