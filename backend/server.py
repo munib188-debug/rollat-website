@@ -39,6 +39,7 @@ from dev_rolls import (
     update_dev_roll,
     cancel_dev_roll,
     fetch_current_dev_roll,
+    fetch_dev_roll,
     list_dev_rolls,
     dev_scheduler_loop,
 )
@@ -620,6 +621,12 @@ async def on_startup():
         await _get_col("dev_rolls").create_index([("scheduled_at", 1), ("phase", 1)])
     except Exception:
         # in-memory fallback collections don't support indexes
+        pass
+    # Secondary index for elimination ticks: scan only the rolls whose next
+    # tick has arrived without sweeping the full collection.
+    try:
+        await _get_col("dev_rolls").create_index([("phase", 1), ("mode", 1), ("next_elimination_at", 1)])
+    except Exception:
         pass
     try:
         await _get_col("guest_rolls").create_index([("scheduled_at", 1), ("phase", 1)])
@@ -1461,18 +1468,34 @@ async def get_qualified_wallets(page: int = 1, per_page: int = 50, search: str =
 
 # ---------- Dev Roll (admin-only setup, public live view) ----------
 
+class DevRollEntryPayload(BaseModel):
+    # Either { wallet: "..." } for entry_type "wallet" rolls,
+    # or { name: "...", image_data_url: "data:image/jpeg;base64,..." } for "custom" rolls.
+    wallet: Optional[str] = None
+    name: Optional[str] = None
+    image_data_url: Optional[str] = None
+
+
 class DevRollCreateRequest(BaseModel):
     title: Optional[str] = None  # e.g. "Community Giveaway #3" (max 60 chars)
-    wallets: List[str]
+    entry_type: str = "wallet"   # "wallet" | "custom"
+    mode: str = "single"         # "single" | "elimination"
+    elimination_interval_secs: Optional[int] = None
+    entries: Optional[List[DevRollEntryPayload]] = None
+    # Backward-compat: old clients still post { wallets: ["..."] }. We unify
+    # this into `entries` server-side.
+    wallets: Optional[List[str]] = None
     pot_sol: float
-    scheduled_at: str  # ISO 8601 with timezone
+    scheduled_at: str            # ISO 8601 with timezone
 
 
 class DevRollUpdateRequest(BaseModel):
-    wallets_to_add: Optional[List[str]] = None  # appended + deduped
+    entries_to_add: Optional[List[DevRollEntryPayload]] = None
+    # Legacy alias for wallet-only rolls.
+    wallets_to_add: Optional[List[str]] = None
     title: Optional[str] = None
     pot_sol: Optional[float] = None
-    scheduled_at: Optional[str] = None  # ISO 8601 with timezone
+    scheduled_at: Optional[str] = None
 
 
 def _parse_scheduled_at(raw: str) -> datetime:
@@ -1488,13 +1511,29 @@ def _parse_scheduled_at(raw: str) -> datetime:
     return dt
 
 
+def _resolve_entries_payload(
+    req_entries: Optional[List[DevRollEntryPayload]],
+    legacy_wallets: Optional[List[str]],
+) -> List[dict]:
+    """Unify the new `entries` shape with legacy `wallets: [str]` payloads."""
+    if req_entries:
+        return [e.model_dump(exclude_none=True) for e in req_entries]
+    if legacy_wallets:
+        return [{"wallet": w} for w in legacy_wallets]
+    raise HTTPException(status_code=400, detail="entries (or wallets) is required")
+
+
 @api_router.post("/dev/roll")
 async def dev_roll_create(req: DevRollCreateRequest, admin: str = Depends(get_admin_wallet)):
     sched = _parse_scheduled_at(req.scheduled_at)
+    entries = _resolve_entries_payload(req.entries, req.wallets)
     return await create_dev_roll(
         _get_col("dev_rolls"),
         title=req.title,
-        wallets=req.wallets,
+        entry_type=req.entry_type,
+        mode=req.mode,
+        elimination_interval_secs=req.elimination_interval_secs,
+        entries=entries,
         pot_sol=req.pot_sol,
         scheduled_at=sched,
         created_by=admin,
@@ -1507,13 +1546,27 @@ async def dev_roll_current():
     return await fetch_current_dev_roll(_get_col("dev_rolls"))
 
 
+@api_router.get("/dev/roll/{roll_id}")
+async def dev_roll_get(roll_id: str, admin: str = Depends(get_admin_wallet)):
+    """Admin-only — full roll record including image data URLs."""
+    doc = await fetch_dev_roll(_get_col("dev_rolls"), roll_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="roll not found")
+    return doc
+
+
 @api_router.patch("/dev/roll/{roll_id}")
 async def dev_roll_update(roll_id: str, req: DevRollUpdateRequest, admin: str = Depends(get_admin_wallet)):
     sched = _parse_scheduled_at(req.scheduled_at) if req.scheduled_at else None
+    entries_to_add: Optional[List[dict]] = None
+    if req.entries_to_add:
+        entries_to_add = [e.model_dump(exclude_none=True) for e in req.entries_to_add]
+    elif req.wallets_to_add:
+        entries_to_add = [{"wallet": w} for w in req.wallets_to_add]
     return await update_dev_roll(
         _get_col("dev_rolls"),
         roll_id,
-        wallets_to_add=req.wallets_to_add,
+        entries_to_add=entries_to_add,
         title=req.title,
         pot_sol=req.pot_sol,
         scheduled_at=sched,

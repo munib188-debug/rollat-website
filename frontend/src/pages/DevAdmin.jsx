@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Wallet, Calendar, Coins, Trash2, ShieldAlert, ShieldCheck, Pen, Tag, Timer, PlusCircle, Save, X } from "lucide-react";
+import {
+  ArrowLeft, Wallet, Calendar, Coins, Trash2, ShieldAlert, ShieldCheck,
+  Pen, Tag, Timer, PlusCircle, Save, X, Image as ImageIcon, User, Skull, Repeat,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useAuth } from "@/lib/AuthContext";
@@ -15,14 +18,63 @@ const ACCENT = "#FF3366";
 const fmtSol = (n) =>
   `${(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} SOL`;
 
-// Convert a `<input type="datetime-local">` value (assumed entered in UTC, since
-// the form labels it as UTC) to an ISO 8601 string the backend will accept.
+// Convert a `<input type="datetime-local">` value (assumed UTC) to ISO 8601.
 function localUtcInputToIso(v) {
   if (!v) return null;
-  // Browser gives us "YYYY-MM-DDTHH:MM" with no timezone. We label the field as
-  // UTC and append Z so the backend treats it as UTC, not local time.
   return `${v}:00Z`;
 }
+
+// Resize an image File to a 512-px max-side JPEG@0.8 data URL.  Keeps payload
+// under the backend's per-entry image cap (~350 KB encoded). Returns a Promise.
+function fileToResizedDataUrl(file, maxSide = 512, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    if (!file?.type?.startsWith("image/")) {
+      reject(new Error("File is not an image"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not decode image"));
+      img.onload = () => {
+        const ratio = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * ratio));
+        const h = Math.max(1, Math.round(img.height * ratio));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        // White background prevents transparent PNGs from going black on JPEG.
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+const intervalToSeconds = (value, unit) => {
+  const n = Math.max(0, parseInt(value) || 0);
+  if (unit === "hours") return n * 3600;
+  if (unit === "minutes") return n * 60;
+  return n;
+};
+
+const formatDuration = (totalSecs) => {
+  if (totalSecs < 60) return `${totalSecs}s`;
+  if (totalSecs < 3600) return `${Math.floor(totalSecs / 60)}m ${totalSecs % 60}s`;
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  return m ? `${h}h ${m}m` : `${h}h`;
+};
 
 export default function DevAdmin() {
   const { publicKey, disconnect } = useWallet();
@@ -30,10 +82,16 @@ export default function DevAdmin() {
   const { isAuthenticated, isAdmin, signIn, signingIn, signOut } = useAuth();
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  // Form state
   const [title, setTitle] = useState("");
+  const [entryType, setEntryType] = useState("wallet"); // "wallet" | "custom"
   const [walletsRaw, setWalletsRaw] = useState("");
+  const [customEntries, setCustomEntries] = useState([]); // [{ tempId, name, image_data_url }]
   const [pot, setPot] = useState("1");
-  const [schedMode, setSchedMode] = useState("timer"); // "timer" | "datetime"
+  const [mode, setMode] = useState("single"); // "single" | "elimination"
+  const [intervalValue, setIntervalValue] = useState("5");
+  const [intervalUnit, setIntervalUnit] = useState("minutes");
+  const [schedMode, setSchedMode] = useState("timer");
   const [timerHours, setTimerHours] = useState("1");
   const [timerMinutes, setTimerMinutes] = useState("0");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -74,30 +132,48 @@ export default function DevAdmin() {
     }
   };
 
+  const resetForm = () => {
+    setTitle("");
+    setWalletsRaw("");
+    setCustomEntries([]);
+    setPot("1");
+    setMode("single");
+    setIntervalValue("5");
+    setIntervalUnit("minutes");
+    setTimerHours("1");
+    setTimerMinutes("0");
+    setScheduledAt("");
+  };
+
   const handleSubmit = async () => {
-    const wallets = walletsRaw
-      .split(/[\s,;\n]+/)
-      .map((w) => w.trim())
-      .filter(Boolean);
-    if (wallets.length === 0) {
-      toast.error("Add at least one wallet");
-      return;
+    // Build entries payload based on type.
+    let entriesPayload = [];
+    if (entryType === "wallet") {
+      const wallets = walletsRaw.split(/[\s,;\n]+/).map((w) => w.trim()).filter(Boolean);
+      if (wallets.length === 0) { toast.error("Add at least one wallet"); return; }
+      const bad = wallets.find((w) => !isValidSolanaAddress(w));
+      if (bad) { toast.error("Invalid wallet", { description: `${bad.slice(0, 24)}…` }); return; }
+      entriesPayload = wallets.map((w) => ({ wallet: w }));
+    } else {
+      if (customEntries.length === 0) { toast.error("Add at least one entry"); return; }
+      const incomplete = customEntries.find((e) => !e.name?.trim() || !e.image_data_url);
+      if (incomplete) { toast.error("Each entry needs a name and a photo"); return; }
+      entriesPayload = customEntries.map((e) => ({ name: e.name.trim(), image_data_url: e.image_data_url }));
     }
-    const bad = wallets.find((w) => !isValidSolanaAddress(w));
-    if (bad) {
-      toast.error("Invalid wallet", { description: `${bad.slice(0, 24)}…` });
-      return;
-    }
+
     const potNum = Number(pot);
-    if (!Number.isFinite(potNum) || potNum < 0) {
-      toast.error("Pot must be a non-negative number");
-      return;
+    if (!Number.isFinite(potNum) || potNum < 0) { toast.error("Pot must be a non-negative number"); return; }
+
+    let intervalSecs = null;
+    if (mode === "elimination") {
+      if (entriesPayload.length < 2) { toast.error("Elimination roll needs at least 2 entries"); return; }
+      intervalSecs = intervalToSeconds(intervalValue, intervalUnit);
+      if (intervalSecs < 5) { toast.error("Interval must be at least 5 seconds"); return; }
     }
+
     let iso;
     if (schedMode === "timer") {
-      const h = Math.max(0, parseInt(timerHours) || 0);
-      const m = Math.max(0, parseInt(timerMinutes) || 0);
-      const totalSecs = h * 3600 + m * 60;
+      const totalSecs = Math.max(0, parseInt(timerHours) || 0) * 3600 + Math.max(0, parseInt(timerMinutes) || 0) * 60;
       if (totalSecs < 30) { toast.error("Timer must be at least 30 seconds"); return; }
       iso = new Date(Date.now() + totalSecs * 1000).toISOString();
     } else {
@@ -109,17 +185,15 @@ export default function DevAdmin() {
     try {
       await api.post("/dev/roll", {
         title: title.trim() || undefined,
-        wallets,
+        entry_type: entryType,
+        mode,
+        elimination_interval_secs: intervalSecs,
+        entries: entriesPayload,
         pot_sol: potNum,
         scheduled_at: iso,
       });
       toast.success("Dev roll scheduled");
-      setTitle("");
-      setWalletsRaw("");
-      setPot("1");
-      setTimerHours("1");
-      setTimerMinutes("0");
-      setScheduledAt("");
+      resetForm();
       await refresh();
     } catch (err) {
       const detail = err?.response?.data?.detail;
@@ -236,19 +310,23 @@ export default function DevAdmin() {
                 Schedule a Dev Roll
               </div>
               <h1 className="font-display font-black text-3xl md:text-4xl tracking-tighter mb-2">
-                Set the wallets, the pot, the time.
+                Set the entries, the pot, the time.
               </h1>
               <p className="text-white/55">
-                Each wallet gets one ticket. Winner is chosen uniformly at random when the
-                scheduled UTC time arrives. Dev rolls are stored separately — they never affect
-                Hall of Fame or stats.
+                Wallet roll, or custom name+photo bracket. Single winner or elimination — your call.
+                Dev rolls are stored separately and never affect Hall of Fame or stats.
               </p>
             </div>
 
             <SetupForm
               title={title} setTitle={setTitle}
+              entryType={entryType} setEntryType={setEntryType}
               walletsRaw={walletsRaw} setWalletsRaw={setWalletsRaw}
+              customEntries={customEntries} setCustomEntries={setCustomEntries}
               pot={pot} setPot={setPot}
+              mode={mode} setMode={setMode}
+              intervalValue={intervalValue} setIntervalValue={setIntervalValue}
+              intervalUnit={intervalUnit} setIntervalUnit={setIntervalUnit}
               schedMode={schedMode} setSchedMode={setSchedMode}
               timerHours={timerHours} setTimerHours={setTimerHours}
               timerMinutes={timerMinutes} setTimerMinutes={setTimerMinutes}
@@ -287,8 +365,13 @@ function Gate({ title, description, action, danger }) {
 
 function SetupForm({
   title, setTitle,
+  entryType, setEntryType,
   walletsRaw, setWalletsRaw,
+  customEntries, setCustomEntries,
   pot, setPot,
+  mode, setMode,
+  intervalValue, setIntervalValue,
+  intervalUnit, setIntervalUnit,
   schedMode, setSchedMode,
   timerHours, setTimerHours,
   timerMinutes, setTimerMinutes,
@@ -299,19 +382,25 @@ function SetupForm({
   const validCount = wallets.filter((w) => isValidSolanaAddress(w)).length;
   const invalidCount = wallets.length - validCount;
 
-  // Live preview of the computed spin time for the timer mode
+  const entryCount = entryType === "wallet" ? validCount : customEntries.length;
+  const intervalSecs = intervalToSeconds(intervalValue, intervalUnit);
+  const totalElimSecs = mode === "elimination" && entryCount > 1 ? (entryCount - 1) * intervalSecs : 0;
+
   const timerPreview = (() => {
-    const h = Math.max(0, parseInt(timerHours) || 0);
-    const m = Math.max(0, parseInt(timerMinutes) || 0);
-    const totalSecs = h * 3600 + m * 60;
+    const totalSecs = Math.max(0, parseInt(timerHours) || 0) * 3600 + Math.max(0, parseInt(timerMinutes) || 0) * 60;
     if (totalSecs < 30) return null;
     return new Date(Date.now() + totalSecs * 1000).toUTCString();
   })();
 
   return (
     <div className="glass rounded-sm p-7 md:p-10 mb-10" data-testid="dev-admin-form">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Entry-type tabs */}
+      <div className="flex items-center gap-2 mb-6">
+        <Tab active={entryType === "wallet"} onClick={() => setEntryType("wallet")} icon={<Wallet className="w-3.5 h-3.5" />} label="Wallet Roll" />
+        <Tab active={entryType === "custom"} onClick={() => setEntryType("custom")} icon={<User className="w-3.5 h-3.5" />} label="Custom Roll" />
+      </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Title */}
         <div className="lg:col-span-3">
           <Label icon={<Tag className="w-3.5 h-3.5" />} text="Roll Title (optional)" />
@@ -326,22 +415,28 @@ function SetupForm({
           <div className="text-[11px] font-mono text-white/35 mt-2">{title.length}/60</div>
         </div>
 
-        {/* Wallet Pool */}
+        {/* Entries (wallet or custom) */}
         <div className="lg:col-span-3">
-          <Label icon={<Wallet className="w-3.5 h-3.5" />} text="Wallet Pool" />
-          <textarea
-            value={walletsRaw}
-            onChange={(e) => setWalletsRaw(e.target.value)}
-            rows={8}
-            placeholder={"Paste wallet addresses, one per line\n(or comma / space separated)"}
-            className="w-full bg-obsidian-950/80 border border-white/10 text-white placeholder:text-white/30 font-mono text-sm rounded-sm p-3 focus:outline-none focus:border-white/30"
-            data-testid="dev-admin-wallets"
-          />
-          <div className="mt-2 flex items-center gap-3 text-[11px] font-mono uppercase tracking-widest text-white/45">
-            <span style={{ color: validCount ? ACCENT : undefined }}>{validCount} valid</span>
-            {invalidCount > 0 && <span className="text-crimson">· {invalidCount} invalid</span>}
-            <span className="text-white/30">· each wallet = 1 ticket · uniform random</span>
-          </div>
+          {entryType === "wallet" ? (
+            <>
+              <Label icon={<Wallet className="w-3.5 h-3.5" />} text="Wallet Pool" />
+              <textarea
+                value={walletsRaw}
+                onChange={(e) => setWalletsRaw(e.target.value)}
+                rows={8}
+                placeholder={"Paste wallet addresses, one per line\n(or comma / space separated)"}
+                className="w-full bg-obsidian-950/80 border border-white/10 text-white placeholder:text-white/30 font-mono text-sm rounded-sm p-3 focus:outline-none focus:border-white/30"
+                data-testid="dev-admin-wallets"
+              />
+              <div className="mt-2 flex items-center gap-3 text-[11px] font-mono uppercase tracking-widest text-white/45">
+                <span style={{ color: validCount ? ACCENT : undefined }}>{validCount} valid</span>
+                {invalidCount > 0 && <span className="text-crimson">· {invalidCount} invalid</span>}
+                <span className="text-white/30">· each wallet = 1 ticket</span>
+              </div>
+            </>
+          ) : (
+            <CustomEntryList entries={customEntries} setEntries={setCustomEntries} />
+          )}
         </div>
 
         {/* Pot */}
@@ -357,17 +452,61 @@ function SetupForm({
           <div className="text-[11px] font-mono text-white/35 mt-2">Display only — settle payment outside the app.</div>
         </div>
 
-        {/* Schedule — timer or datetime toggle */}
+        {/* Mode + interval */}
         <div className="lg:col-span-2">
+          <Label icon={<Repeat className="w-3.5 h-3.5" />} text="Mode" />
+          <div className="flex gap-2">
+            <Tab active={mode === "single"} onClick={() => setMode("single")} icon={<Tag className="w-3.5 h-3.5" />} label="Single Winner" />
+            <Tab active={mode === "elimination"} onClick={() => setMode("elimination")} icon={<Skull className="w-3.5 h-3.5" />} label="Elimination" />
+          </div>
+
+          {mode === "elimination" && (
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-[10px] font-mono text-white/40 mb-1">INTERVAL BETWEEN ELIMINATIONS</div>
+                <Input
+                  value={intervalValue}
+                  onChange={(e) => setIntervalValue(e.target.value.replace(/\D/g, ""))}
+                  type="number" min="1"
+                  className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm"
+                  data-testid="dev-admin-interval-value"
+                />
+              </div>
+              <div>
+                <div className="text-[10px] font-mono text-white/40 mb-1">UNIT</div>
+                <select
+                  value={intervalUnit}
+                  onChange={(e) => setIntervalUnit(e.target.value)}
+                  className="w-full bg-obsidian-950/80 border border-white/10 text-white font-mono h-11 rounded-sm px-3 focus:outline-none focus:border-white/30"
+                  data-testid="dev-admin-interval-unit"
+                >
+                  <option value="seconds">seconds</option>
+                  <option value="minutes">minutes</option>
+                  <option value="hours">hours</option>
+                </select>
+              </div>
+              <div className="col-span-2 text-[11px] font-mono text-white/45">
+                {entryCount > 1 ? (
+                  <>≈ {entryCount - 1} eliminations × {formatDuration(intervalSecs)} = <span style={{ color: ACCENT }}>{formatDuration(totalElimSecs)}</span> total</>
+                ) : (
+                  <>Add at least 2 entries to estimate total duration.</>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Schedule */}
+        <div className="lg:col-span-3">
           <div className="flex items-center justify-between mb-2">
             <Label icon={<Calendar className="w-3.5 h-3.5" />} text="Schedule" />
             <div className="flex rounded-sm overflow-hidden border border-white/10">
-              {[["timer", <Timer className="w-3 h-3 mr-1" />, "Countdown"], ["datetime", <Calendar className="w-3 h-3 mr-1" />, "Date & Time"]].map(([mode, icon, label]) => (
+              {[["timer", <Timer key="t" className="w-3 h-3 mr-1" />, "Countdown"], ["datetime", <Calendar key="d" className="w-3 h-3 mr-1" />, "Date & Time"]].map(([m, icon, label]) => (
                 <button
-                  key={mode}
-                  onClick={() => setSchedMode(mode)}
-                  className={`flex items-center px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest transition-colors ${schedMode === mode ? "text-obsidian-950 font-bold" : "text-white/40 hover:text-white/70"}`}
-                  style={{ backgroundColor: schedMode === mode ? ACCENT : "transparent" }}
+                  key={m}
+                  onClick={() => setSchedMode(m)}
+                  className={`flex items-center px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest transition-colors ${schedMode === m ? "text-obsidian-950 font-bold" : "text-white/40 hover:text-white/70"}`}
+                  style={{ backgroundColor: schedMode === m ? ACCENT : "transparent" }}
                 >
                   {icon}{label}
                 </button>
@@ -427,8 +566,130 @@ function SetupForm({
           style={{ backgroundColor: ACCENT, color: "#0A0D0B" }}
           data-testid="dev-admin-submit"
         >
-          {submitting ? "Scheduling…" : "Schedule Dev Roll"}
+          {submitting ? "Scheduling…" : `Schedule ${mode === "elimination" ? "Elimination" : "Dev"} Roll`}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function Tab({ active, onClick, icon, label }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-sm border font-mono text-[11px] uppercase tracking-widest transition-colors"
+      style={{
+        borderColor: active ? ACCENT : "#ffffff10",
+        backgroundColor: active ? `${ACCENT}15` : "transparent",
+        color: active ? ACCENT : "#ffffff80",
+      }}
+    >
+      {icon}{label}
+    </button>
+  );
+}
+
+function CustomEntryList({ entries, setEntries }) {
+  const fileInputRef = useRef(null);
+  const [pendingName, setPendingName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    if (!pendingName.trim()) {
+      toast.error("Type a name first, then pick the photo");
+      return;
+    }
+    setBusy(true);
+    try {
+      const dataUrl = await fileToResizedDataUrl(file, 512, 0.8);
+      // Encoded length cap to stay under the backend limit (~350 KB).
+      if (dataUrl.length > 340_000) {
+        toast.error("Image too large after resize — try a smaller source");
+        return;
+      }
+      setEntries((prev) => [
+        ...prev,
+        { tempId: crypto.randomUUID(), name: pendingName.trim().slice(0, 60), image_data_url: dataUrl },
+      ]);
+      setPendingName("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err) {
+      toast.error("Could not load image", { description: err?.message || "" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = (tempId) => setEntries((prev) => prev.filter((e) => e.tempId !== tempId));
+  const renameAt = (tempId, name) =>
+    setEntries((prev) => prev.map((e) => e.tempId === tempId ? { ...e, name: name.slice(0, 60) } : e));
+
+  return (
+    <div>
+      <Label icon={<ImageIcon className="w-3.5 h-3.5" />} text={`Custom Entries (${entries.length})`} />
+      <div className="bg-obsidian-950/60 border border-white/10 rounded-sm p-4">
+        {/* Add row */}
+        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
+          <div className="flex-1">
+            <div className="text-[10px] font-mono text-white/40 mb-1">NAME</div>
+            <Input
+              value={pendingName}
+              onChange={(e) => setPendingName(e.target.value.slice(0, 60))}
+              placeholder="e.g. Bob"
+              className="bg-obsidian-950/80 border-white/10 text-white font-mono h-10 rounded-sm placeholder:text-white/25"
+              data-testid="dev-admin-custom-name"
+            />
+          </div>
+          <div>
+            <div className="text-[10px] font-mono text-white/40 mb-1">PHOTO</div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(e) => handleFile(e.target.files?.[0])}
+              className="hidden"
+            />
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy || !pendingName.trim()}
+              className="font-bold uppercase tracking-widest text-[11px] rounded-sm h-10 px-4"
+              style={{ backgroundColor: ACCENT, color: "#0A0D0B" }}
+              data-testid="dev-admin-custom-add"
+            >
+              <PlusCircle className="w-3.5 h-3.5 mr-1.5" />
+              {busy ? "Adding…" : "Add Entry"}
+            </Button>
+          </div>
+        </div>
+        <div className="text-[11px] font-mono text-white/35 mt-2">
+          Type a name, pick a photo. Photos are resized to 512px and compressed before upload.
+        </div>
+
+        {/* Existing entries */}
+        {entries.length > 0 && (
+          <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {entries.map((e) => (
+              <div key={e.tempId} className="border border-white/10 bg-obsidian-900/60 rounded-sm p-2 group relative">
+                <div className="aspect-square w-full overflow-hidden rounded-sm bg-obsidian-950 mb-2">
+                  <img src={e.image_data_url} alt={e.name} className="w-full h-full object-cover" />
+                </div>
+                <Input
+                  value={e.name}
+                  onChange={(ev) => renameAt(e.tempId, ev.target.value)}
+                  className="bg-obsidian-950/80 border-white/10 text-white font-mono h-8 rounded-sm text-xs"
+                />
+                <button
+                  onClick={() => remove(e.tempId)}
+                  className="absolute top-1 right-1 w-6 h-6 rounded-sm bg-obsidian-950/80 border border-white/10 text-white/60 hover:text-crimson hover:border-crimson/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label="Remove entry"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -451,6 +712,13 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
 
   if (!roll) return null;
   const editable = roll.phase === "scheduled";
+  const cancellable = roll.phase === "scheduled" || roll.phase === "spinning";
+  const isWalletRoll = (roll.entry_type || "wallet") === "wallet";
+  const isElim = roll.mode === "elimination";
+
+  const entryCount = (roll.entries?.length ?? 0) || (roll.wallets?.length ?? 0);
+  const survivorCount = roll.survivors?.length ?? entryCount;
+  const eliminatedCount = roll.eliminated?.length ?? 0;
 
   const handleEdit = () => {
     setEditPot(roll.pot_sol?.toString() || "");
@@ -460,8 +728,10 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
 
   const handleSave = async () => {
     const payload = {};
-    const newWallets = addWallets.split(/[\s,;\n]+/).map((w) => w.trim()).filter(Boolean);
-    if (newWallets.length > 0) payload.wallets_to_add = newWallets;
+    if (isWalletRoll) {
+      const newWallets = addWallets.split(/[\s,;\n]+/).map((w) => w.trim()).filter(Boolean);
+      if (newWallets.length > 0) payload.wallets_to_add = newWallets;
+    }
     const potNum = Number(editPot);
     if (editPot && Number.isFinite(potNum) && potNum !== roll.pot_sol) payload.pot_sol = potNum;
     if (!payload.wallets_to_add && payload.pot_sol === undefined) {
@@ -486,12 +756,12 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
 
   return (
     <div className="bg-obsidian-900/40 border border-white/5 rounded-sm mb-10" data-testid="dev-admin-current">
-      <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between flex-wrap gap-2">
         <div className="text-[10px] uppercase tracking-[0.3em] font-mono" style={{ color: ACCENT }}>
-          Active Roll · {roll.phase}{roll.title ? ` · ${roll.title}` : ""}
+          Active Roll · {roll.phase} · {isWalletRoll ? "wallet" : "custom"}{isElim ? " · elimination" : ""}{roll.title ? ` · ${roll.title}` : ""}
         </div>
         <div className="flex items-center gap-2">
-          {editable && !editing && (
+          {editable && !editing && isWalletRoll && (
             <Button
               onClick={handleEdit}
               variant="outline"
@@ -501,7 +771,7 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
               <PlusCircle className="w-3 h-3 mr-1.5" /> Edit
             </Button>
           )}
-          {editable && (
+          {cancellable && (
             <Button
               onClick={() => onCancel(roll.id)}
               variant="outline"
@@ -514,11 +784,18 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
         </div>
       </div>
 
-      <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+      <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <Stat label="Pot" value={fmtSol(roll.pot_sol)} />
-        <Stat label="Wallets" value={roll.wallets?.length ?? 0} />
-        <Stat label="Scheduled" value={new Date(roll.scheduled_at).toUTCString()} />
-        {roll.winner && <Stat label="Winner" value={truncWallet(roll.winner)} accent />}
+        <Stat label="Entries" value={entryCount} />
+        {isElim ? (
+          <>
+            <Stat label="Survivors" value={`${survivorCount} / ${entryCount}`} />
+            <Stat label="Eliminated" value={eliminatedCount} />
+          </>
+        ) : (
+          <Stat label="Scheduled" value={new Date(roll.scheduled_at).toUTCString()} />
+        )}
+        {roll.winner && <Stat label="Winner" value={isWalletRoll ? truncWallet(roll.winner) : roll.winner} accent />}
       </div>
 
       {editing && (
@@ -541,7 +818,7 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
                 <div className="mt-1.5 flex items-center gap-3 text-[11px] font-mono uppercase tracking-widest text-white/45">
                   <span style={{ color: validNew ? ACCENT : undefined }}>+{validNew} valid</span>
                   {invalidNew > 0 && <span className="text-crimson">· {invalidNew} invalid</span>}
-                  <span className="text-white/30">· new total: {(roll.wallets?.length ?? 0) + validNew}</span>
+                  <span className="text-white/30">· new total: {entryCount + validNew}</span>
                 </div>
               )}
             </div>
@@ -594,20 +871,30 @@ function HistoryList({ history, loading }) {
       {history.length === 0 && (
         <div className="px-6 py-10 text-center text-white/40 text-sm">No dev rolls yet.</div>
       )}
-      {history.map((r) => (
-        <div key={r.id} className="grid grid-cols-12 gap-3 px-6 py-3 border-b border-white/5 last:border-b-0 items-center text-sm">
-          <div className="col-span-2 font-mono text-white/40 uppercase text-[10px] tracking-widest">{r.phase}</div>
-          <div className="col-span-3 font-mono text-white/80">{fmtSol(r.pot_sol)}</div>
-          <div className="col-span-3 font-mono text-white/60 text-xs">{new Date(r.scheduled_at).toUTCString()}</div>
-          <div className="col-span-4 font-mono text-right">
-            {r.winner ? (
-              <span style={{ color: ACCENT }}>{truncWallet(r.winner)}</span>
-            ) : (
-              <span className="text-white/30">—</span>
-            )}
+      {history.map((r) => {
+        const isWalletRoll = (r.entry_type || "wallet") === "wallet";
+        const isElim = r.mode === "elimination";
+        const winnerLabel = r.winner ? (isWalletRoll ? truncWallet(r.winner) : r.winner) : null;
+        return (
+          <div key={r.id} className="grid grid-cols-12 gap-3 px-6 py-3 border-b border-white/5 last:border-b-0 items-center text-sm">
+            <div className="col-span-2 font-mono text-white/40 uppercase text-[10px] tracking-widest">
+              {r.phase}{isElim ? " · elim" : ""}
+            </div>
+            <div className="col-span-2 font-mono text-white/80">{fmtSol(r.pot_sol)}</div>
+            <div className="col-span-2 font-mono text-white/55 text-xs">
+              {isWalletRoll ? "wallet" : "custom"} · {r.entries?.length ?? r.wallets?.length ?? 0}
+            </div>
+            <div className="col-span-2 font-mono text-white/60 text-xs">{new Date(r.scheduled_at).toUTCString().slice(5, 22)}</div>
+            <div className="col-span-4 font-mono text-right">
+              {winnerLabel ? (
+                <span style={{ color: ACCENT }}>{winnerLabel}</span>
+              ) : (
+                <span className="text-white/30">—</span>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

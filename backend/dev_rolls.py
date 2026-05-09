@@ -1,10 +1,12 @@
 """Dev Roll feature for $ROLLAT.
 
-A parallel, admin-only spin mechanism. The admin schedules a roll by pasting
-wallets, picking a display pot amount (NOT a real on-chain transfer), and an
-exact UTC timestamp. A background scheduler picks one winner uniformly at
-random when that time arrives. The roll's lifecycle is visible publicly on the
-landing page so anyone can watch it run.
+A parallel, admin-only spin mechanism. The admin schedules a roll by adding
+entries (Solana wallets OR custom name+photo entries), picking a display pot
+amount (NOT a real on-chain transfer), an exact UTC timestamp, and a mode:
+
+  - single:      one winner picked uniformly at random when the time arrives
+  - elimination: one entry eliminated per tick at a configured interval until
+                 a single survivor remains
 
 Storage is fully separate from the real `winners` collection so dev rolls
 NEVER appear in Hall of Fame or affect `total_distributed_sol`,
@@ -19,14 +21,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import base58
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from telegram_bot import (
     announce_dev_roll_scheduled,
     announce_dev_roll_spinning,
@@ -37,9 +40,10 @@ from telegram_bot import (
 
 logger = logging.getLogger(__name__)
 
-# Animation duration the public widget renders for the spinning phase.
-# Picked to roughly match the existing main-wheel reel feel; configurable via
-# env so the admin can shorten/lengthen the suspense window without a deploy.
+# Animation duration the public widget renders for the spinning phase of a
+# single-winner roll. Picked to roughly match the existing main-wheel reel
+# feel; configurable via env so the admin can shorten/lengthen the suspense
+# window without a deploy.
 DEV_SPIN_ANIMATION_SECS = int(os.environ.get("DEV_SPIN_ANIMATION_SECS", "9"))
 
 # Maximum pot value accepted on the form. Display-only — not enforced on-chain.
@@ -49,26 +53,99 @@ MAX_POT_SOL = 10_000.0
 # finishes. After this window elapses, /dev/roll/current returns null again.
 RESOLVED_DISPLAY_SECS = 300
 
+# Caps for elimination-mode interval (5 seconds .. 7 days).
+MIN_ELIM_INTERVAL_SECS = 5
+MAX_ELIM_INTERVAL_SECS = 7 * 24 * 3600
+
+# Caps for entry counts and image payloads. Mongo's BSON document limit is
+# 16 MB; we cap custom rolls comfortably under that.
+MAX_WALLET_ENTRIES = 500
+MAX_CUSTOM_ENTRIES = 50
+MAX_IMAGE_DATA_URL_LEN = 350_000  # ~260 KB decoded — plenty for a 512x512 JPEG
+MAX_NAME_LEN = 60
+
+_DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$")
+
 
 # ---------- model ----------
+
+class RollEntry(BaseModel):
+    """A single entry in a dev roll. Either a wallet (entry_type == 'wallet')
+    or a custom name+image (entry_type == 'custom'). The `id` is stable across
+    the roll's lifecycle so eliminations and the winner can reference it."""
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    wallet: Optional[str] = None
+    name: Optional[str] = None
+    image_data_url: Optional[str] = None
+
+
+class EliminationEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    entry_id: str
+    eliminated_at: datetime
+    position: int  # 1 = first out, N-1 = runner-up
+
 
 class DevRoll(BaseModel):
     """A scheduled or completed dev roll. Stored in `dev_rolls` collection."""
     model_config = ConfigDict(extra="ignore")
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    title: Optional[str] = None           # e.g. "Community Giveaway #3"
-    ten_min_warned: bool = False          # True once the 10-min reminder is sent
-    wallets: List[str]
+    title: Optional[str] = None
+    ten_min_warned: bool = False
+
+    entry_type: Literal["wallet", "custom"] = "wallet"
+    mode: Literal["single", "elimination"] = "single"
+    elimination_interval_secs: Optional[int] = None  # required when mode == "elimination"
+
+    entries: List[RollEntry] = Field(default_factory=list)
+    survivors: List[str] = Field(default_factory=list)        # entry IDs still in
+    eliminated: List[EliminationEvent] = Field(default_factory=list)
+    next_elimination_at: Optional[datetime] = None
+
     pot_sol: float
     scheduled_at: datetime
-    phase: str = "scheduled"            # scheduled | spinning | resolved | cancelled
+    phase: str = "scheduled"  # scheduled | spinning | resolved | cancelled
+
+    winner_entry_id: Optional[str] = None
+    # Display-only mirror of the winner: wallet for wallet rolls, name for
+    # custom rolls. Kept so old API consumers / Telegram code keep working.
     winner: Optional[str] = None
+
     spin_started_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_by: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy(cls, values):
+        """Lazily migrate documents written by the pre-elimination version,
+        which stored `wallets: [str]` instead of `entries: [RollEntry]`. We
+        don't rewrite the Mongo doc — the migrated shape only lives in memory
+        once it's read back."""
+        if not isinstance(values, dict):
+            return values
+        if "entries" in values and values["entries"]:
+            return values
+        legacy_wallets = values.get("wallets")
+        if isinstance(legacy_wallets, list) and legacy_wallets:
+            values["entries"] = [
+                {"id": str(uuid.uuid4()), "wallet": w} for w in legacy_wallets
+            ]
+            values.setdefault("entry_type", "wallet")
+            values.setdefault("mode", "single")
+            legacy_winner = values.get("winner")
+            if legacy_winner and not values.get("winner_entry_id"):
+                for e in values["entries"]:
+                    if e["wallet"] == legacy_winner:
+                        values["winner_entry_id"] = e["id"]
+                        break
+        return values
 
 
 # ---------- helpers ----------
@@ -91,45 +168,115 @@ def _ensure_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def validate_wallets(raw: List[str]) -> List[str]:
-    """Strip whitespace, drop blanks, dedupe (preserving order), reject anything
-    that isn't a valid base58 Solana pubkey. Raises HTTPException(400) with a
-    message naming the offending input on any failure."""
-    if not isinstance(raw, list) or not raw:
-        raise HTTPException(status_code=400, detail="wallets list is required")
+def validate_entries(raw_entries: List[dict], entry_type: str) -> List[RollEntry]:
+    """Validate and normalize a list of entries. Each entry must match the
+    declared `entry_type`. Returns RollEntry instances ready to embed into
+    DevRoll. Raises HTTPException(400) on any failure."""
+    if not isinstance(raw_entries, list) or not raw_entries:
+        raise HTTPException(status_code=400, detail="entries list is required")
 
-    seen: set[str] = set()
-    cleaned: List[str] = []
-    for entry in raw:
-        if entry is None:
-            continue
-        addr = str(entry).strip()
-        if not addr:
-            continue
-        if addr in seen:
-            continue
-        if not _is_valid_solana_address(addr):
-            raise HTTPException(status_code=400, detail=f"invalid wallet: {addr[:24]}…")
-        seen.add(addr)
-        cleaned.append(addr)
+    cleaned: List[RollEntry] = []
+    seen_wallets: set[str] = set()
+
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=400, detail="each entry must be an object")
+
+        if entry_type == "wallet":
+            wallet = str(raw.get("wallet") or "").strip()
+            if not wallet:
+                raise HTTPException(status_code=400, detail="wallet entry missing 'wallet' field")
+            if not _is_valid_solana_address(wallet):
+                raise HTTPException(status_code=400, detail=f"invalid wallet: {wallet[:24]}…")
+            if raw.get("name") or raw.get("image_data_url"):
+                raise HTTPException(status_code=400, detail="wallet entries must not include name/image_data_url")
+            if wallet in seen_wallets:
+                continue  # silent dedupe matches the prior wallets-array behavior
+            seen_wallets.add(wallet)
+            cleaned.append(RollEntry(wallet=wallet))
+
+        elif entry_type == "custom":
+            name = str(raw.get("name") or "").strip()
+            image = str(raw.get("image_data_url") or "")
+            if not name:
+                raise HTTPException(status_code=400, detail="custom entry missing 'name'")
+            if len(name) > MAX_NAME_LEN:
+                raise HTTPException(status_code=400, detail=f"name too long (max {MAX_NAME_LEN} chars)")
+            if not image:
+                raise HTTPException(status_code=400, detail=f"custom entry '{name}' missing image")
+            if len(image) > MAX_IMAGE_DATA_URL_LEN:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"image for '{name}' too large — resize/compress before upload",
+                )
+            if not _DATA_URL_RE.match(image):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"image for '{name}' must be a data URL (image/png|jpeg|webp)",
+                )
+            if raw.get("wallet"):
+                raise HTTPException(status_code=400, detail="custom entries must not include 'wallet'")
+            cleaned.append(RollEntry(name=name, image_data_url=image))
+
+        else:
+            raise HTTPException(status_code=400, detail=f"unknown entry_type '{entry_type}'")
 
     if not cleaned:
-        raise HTTPException(status_code=400, detail="no valid wallets supplied")
-    if len(cleaned) > 500:
-        raise HTTPException(status_code=400, detail="too many wallets (max 500)")
+        raise HTTPException(status_code=400, detail="no valid entries supplied")
+
+    cap = MAX_WALLET_ENTRIES if entry_type == "wallet" else MAX_CUSTOM_ENTRIES
+    if len(cleaned) > cap:
+        raise HTTPException(status_code=400, detail=f"too many entries (max {cap} for {entry_type} rolls)")
+
     return cleaned
 
 
-def _normalize_doc(doc: Optional[dict]) -> Optional[dict]:
-    """Strip Mongo's `_id` and coerce datetimes to ISO strings for JSON output."""
+def _normalize_doc(doc: Optional[dict], *, strip_images: bool = False) -> Optional[dict]:
+    """Strip Mongo's `_id`, run the legacy migrator (so old rows return the
+    new shape), and coerce datetimes to ISO strings for JSON output. When
+    `strip_images=True`, drop heavy `image_data_url` fields from entries —
+    used for history list responses."""
     if not doc:
         return None
-    out = {k: v for k, v in doc.items() if k != "_id"}
-    for k in ("scheduled_at", "spin_started_at", "resolved_at", "cancelled_at", "created_at"):
-        v = out.get(k)
-        if isinstance(v, datetime):
-            out[k] = _ensure_utc(v).isoformat()
+    try:
+        roll = DevRoll.model_validate(doc)
+    except Exception:
+        # Fall back to a raw dump if a doc somehow can't be migrated.
+        out = {k: v for k, v in doc.items() if k != "_id"}
+        for k in ("scheduled_at", "spin_started_at", "resolved_at", "cancelled_at",
+                  "created_at", "next_elimination_at"):
+            v = out.get(k)
+            if isinstance(v, datetime):
+                out[k] = _ensure_utc(v).isoformat()
+        return out
+
+    out = roll.model_dump(mode="json")  # converts datetimes to ISO strings
+    if strip_images and out.get("entry_type") == "custom":
+        for e in out.get("entries", []):
+            if e.get("image_data_url"):
+                e["image_data_url"] = None
     return out
+
+
+def _entry_label(entry: RollEntry) -> str:
+    """Human-readable label for an entry — used in Telegram messages."""
+    if entry.wallet:
+        return entry.wallet
+    return entry.name or "(unnamed)"
+
+
+def _validate_interval(secs: Optional[int]) -> int:
+    if secs is None:
+        raise HTTPException(status_code=400, detail="elimination_interval_secs is required for elimination mode")
+    try:
+        secs = int(secs)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="elimination_interval_secs must be an integer")
+    if secs < MIN_ELIM_INTERVAL_SECS:
+        raise HTTPException(status_code=400, detail=f"interval must be ≥ {MIN_ELIM_INTERVAL_SECS} seconds")
+    if secs > MAX_ELIM_INTERVAL_SECS:
+        raise HTTPException(status_code=400, detail="interval must be ≤ 7 days")
+    return secs
 
 
 # ---------- repository ----------
@@ -144,14 +291,30 @@ async def create_dev_roll(
     col,
     *,
     title: Optional[str] = None,
-    wallets: List[str],
+    entry_type: str = "wallet",
+    mode: str = "single",
+    elimination_interval_secs: Optional[int] = None,
+    entries: List[dict],
     pot_sol: float,
     scheduled_at: datetime,
     created_by: str,
 ) -> dict:
+    if entry_type not in ("wallet", "custom"):
+        raise HTTPException(status_code=400, detail="entry_type must be 'wallet' or 'custom'")
+    if mode not in ("single", "elimination"):
+        raise HTTPException(status_code=400, detail="mode must be 'single' or 'elimination'")
+
     if title is not None:
-        title = str(title).strip()[:60] or None  # max 60 chars, blank becomes None
-    cleaned = validate_wallets(wallets)
+        title = str(title).strip()[:60] or None
+
+    cleaned_entries = validate_entries(entries, entry_type)
+
+    if mode == "elimination":
+        if len(cleaned_entries) < 2:
+            raise HTTPException(status_code=400, detail="elimination roll needs at least 2 entries")
+        elimination_interval_secs = _validate_interval(elimination_interval_secs)
+    else:
+        elimination_interval_secs = None  # ignore for single-mode
 
     try:
         pot_value = float(pot_sol)
@@ -170,19 +333,21 @@ async def create_dev_roll(
 
     roll = DevRoll(
         title=title,
-        wallets=cleaned,
+        entry_type=entry_type,
+        mode=mode,
+        elimination_interval_secs=elimination_interval_secs,
+        entries=cleaned_entries,
         pot_sol=pot_value,
         scheduled_at=sched,
         created_by=created_by,
     )
     doc = roll.model_dump()
-    # Mongo motor handles datetime natively; nothing to coerce.
     await col.insert_one(doc)
     normalized = _normalize_doc(doc)
     asyncio.create_task(announce_dev_roll_scheduled(
         title=title,
         pot_sol=pot_value,
-        wallet_count=len(cleaned),
+        wallet_count=len(cleaned_entries),
         scheduled_at_iso=normalized.get("scheduled_at", ""),
     ))
     return normalized
@@ -192,27 +357,37 @@ async def update_dev_roll(
     col,
     roll_id: str,
     *,
-    wallets_to_add: Optional[List[str]] = None,
+    entries_to_add: Optional[List[dict]] = None,
     title: Optional[str] = None,
     pot_sol: Optional[float] = None,
     scheduled_at: Optional[datetime] = None,
 ) -> dict:
-    """Edit a still-scheduled roll. Wallets are *appended* (deduplicated)."""
+    """Edit a still-scheduled roll. Entries are appended (deduped on wallet
+    for wallet rolls)."""
     doc = await col.find_one({"id": roll_id})
     if not doc:
         raise HTTPException(status_code=404, detail="roll not found")
     if doc.get("phase") != "scheduled":
         raise HTTPException(status_code=400, detail=f"cannot edit a roll in phase '{doc.get('phase')}'")
 
+    existing_roll = DevRoll.model_validate(doc)
     updates: dict = {}
 
-    if wallets_to_add is not None:
-        new_validated = validate_wallets(wallets_to_add)
-        existing = doc.get("wallets", [])
-        merged = list(dict.fromkeys(existing + new_validated))
-        if len(merged) > 500:
-            raise HTTPException(status_code=400, detail="too many wallets (max 500)")
-        updates["wallets"] = merged
+    if entries_to_add is not None:
+        new_validated = validate_entries(entries_to_add, existing_roll.entry_type)
+        merged = list(existing_roll.entries)
+        if existing_roll.entry_type == "wallet":
+            seen = {e.wallet for e in merged}
+            for e in new_validated:
+                if e.wallet not in seen:
+                    merged.append(e)
+                    seen.add(e.wallet)
+        else:
+            merged.extend(new_validated)
+        cap = MAX_WALLET_ENTRIES if existing_roll.entry_type == "wallet" else MAX_CUSTOM_ENTRIES
+        if len(merged) > cap:
+            raise HTTPException(status_code=400, detail=f"too many entries (max {cap})")
+        updates["entries"] = [e.model_dump() for e in merged]
 
     if title is not None:
         updates["title"] = str(title).strip()[:60] or None
@@ -231,7 +406,7 @@ async def update_dev_roll(
         if sched <= datetime.now(timezone.utc) + timedelta(seconds=5):
             raise HTTPException(status_code=400, detail="scheduled_at must be at least 5 seconds in the future")
         updates["scheduled_at"] = sched
-        updates["ten_min_warned"] = False  # reset so the reminder fires again at the new time
+        updates["ten_min_warned"] = False
 
     if not updates:
         return _normalize_doc(doc)
@@ -245,11 +420,16 @@ async def cancel_dev_roll(col, roll_id: str) -> dict:
     doc = await col.find_one({"id": roll_id})
     if not doc:
         raise HTTPException(status_code=404, detail="roll not found")
-    if doc.get("phase") != "scheduled":
-        raise HTTPException(status_code=400, detail=f"cannot cancel a roll in phase '{doc.get('phase')}'")
+    phase = doc.get("phase")
+    if phase not in ("scheduled", "spinning"):
+        raise HTTPException(status_code=400, detail=f"cannot cancel a roll in phase '{phase}'")
     await col.update_one(
         {"id": roll_id},
-        {"$set": {"phase": "cancelled", "cancelled_at": datetime.now(timezone.utc)}},
+        {"$set": {
+            "phase": "cancelled",
+            "cancelled_at": datetime.now(timezone.utc),
+            "next_elimination_at": None,
+        }},
     )
     updated = await col.find_one({"id": roll_id})
     return _normalize_doc(updated)
@@ -259,12 +439,10 @@ async def fetch_current_dev_roll(col) -> Optional[dict]:
     """Returns the roll the public page should display, or None if there's
     nothing to show. Includes resolved rolls for a brief lingering window so
     the winner card stays visible after the spin lands."""
-    # Active first.
     doc = await col.find_one({"phase": {"$in": ["scheduled", "spinning"]}})
     if doc:
         return _normalize_doc(doc)
 
-    # Recently resolved? Linger for RESOLVED_DISPLAY_SECS.
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=RESOLVED_DISPLAY_SECS)
     cur = col.find({"phase": "resolved", "resolved_at": {"$gte": cutoff}}).sort("resolved_at", -1).limit(1)
     docs = await cur.to_list(1)
@@ -272,26 +450,26 @@ async def fetch_current_dev_roll(col) -> Optional[dict]:
 
 
 async def list_dev_rolls(col, limit: int = 50) -> List[dict]:
+    """History list. Heavy `image_data_url` fields are stripped to keep the
+    response payload small — admin can fetch a single roll for the full data."""
     cur = col.find({}).sort("created_at", -1).limit(limit)
     docs = await cur.to_list(limit)
-    return [_normalize_doc(d) for d in docs]
+    return [_normalize_doc(d, strip_images=True) for d in docs]
+
+
+async def fetch_dev_roll(col, roll_id: str) -> Optional[dict]:
+    doc = await col.find_one({"id": roll_id})
+    return _normalize_doc(doc)
 
 
 # ---------- scheduler ----------
 
-async def _resolve_one_roll(col, roll: dict) -> None:
-    """Transition scheduled -> spinning, sleep for the animation window, pick
-    a winner uniformly at random, transition to resolved.
-
-    The transition to spinning is recorded immediately so multiple workers (or
-    tabs polling /dev/roll/current) can see the wheel turning before the
-    winner is committed."""
-    roll_id = roll["id"]
+async def _resolve_single_roll(col, roll_doc: dict) -> None:
+    """Single-winner path: flip to spinning, sleep through the animation
+    window, pick a winner uniformly at random, transition to resolved."""
+    roll_id = roll_doc["id"]
     now = datetime.now(timezone.utc)
 
-    # Race-safe atomic transition: only one worker wins the flip from
-    # 'scheduled' -> 'spinning'. Critical when Render scales to >1 instance —
-    # without this, two workers could both fire winner announcements.
     try:
         result = await col.update_one(
             {"id": roll_id, "phase": "scheduled"},
@@ -299,7 +477,6 @@ async def _resolve_one_roll(col, roll: dict) -> None:
         )
         matched = getattr(result, "matched_count", None)
         if matched == 0:
-            # Lost the race — another worker grabbed this roll.
             return
     except Exception:
         logger.exception(f"[dev_roll] phase flip failed for {roll_id}")
@@ -309,38 +486,197 @@ async def _resolve_one_roll(col, roll: dict) -> None:
     if not refreshed or refreshed.get("phase") != "spinning":
         return
 
-    logger.info(f"[dev_roll] spinning roll {roll_id} ({len(refreshed['wallets'])} wallets, pot={refreshed['pot_sol']})")
+    try:
+        roll = DevRoll.model_validate(refreshed)
+    except Exception:
+        logger.exception(f"[dev_roll] could not parse roll {roll_id}")
+        return
+
+    logger.info(
+        f"[dev_roll] spinning roll {roll_id} "
+        f"({len(roll.entries)} {roll.entry_type} entries, pot={roll.pot_sol})"
+    )
     asyncio.create_task(announce_dev_roll_spinning(
-        title=refreshed.get("title"),
-        pot_sol=refreshed["pot_sol"],
-        wallet_count=len(refreshed["wallets"]),
+        title=roll.title,
+        pot_sol=roll.pot_sol,
+        wallet_count=len(roll.entries),
     ))
 
-    # Suspense window matches the public widget's animation duration.
     await asyncio.sleep(DEV_SPIN_ANIMATION_SECS)
 
-    winner = secrets.SystemRandom().choice(refreshed["wallets"])
+    rng = secrets.SystemRandom()
+    winner_entry = rng.choice(roll.entries)
     resolved_at = datetime.now(timezone.utc)
-    await col.update_one(
-        {"id": roll_id},
-        {"$set": {"phase": "resolved", "winner": winner, "resolved_at": resolved_at}},
+    # Guard against mid-animation cancellation: only commit if still spinning.
+    result = await col.update_one(
+        {"id": roll_id, "phase": "spinning"},
+        {"$set": {
+            "phase": "resolved",
+            "winner_entry_id": winner_entry.id,
+            "winner": _entry_label(winner_entry),
+            "resolved_at": resolved_at,
+        }},
     )
-    logger.info(f"[dev_roll] resolved roll {roll_id} -> {winner}")
+    if getattr(result, "matched_count", 0) == 0:
+        logger.info(f"[dev_roll] roll {roll_id} cancelled mid-spin; skipping winner")
+        return
+    logger.info(f"[dev_roll] resolved roll {roll_id} -> {_entry_label(winner_entry)}")
     asyncio.create_task(announce_dev_roll_winner(
-        title=refreshed.get("title"),
-        winner_wallet=winner,
-        pot_sol=refreshed["pot_sol"],
+        title=roll.title,
+        winner_wallet=winner_entry.wallet or _entry_label(winner_entry),
+        pot_sol=roll.pot_sol,
     ))
     asyncio.create_task(announce_buy_cta())
 
 
-async def run_due_rolls(col) -> int:
-    """Find every scheduled roll whose time has arrived and resolve it.
-    Also sends a 10-minute reminder for upcoming rolls.
-    Returns the number of rolls fired this tick (typically 0 or 1)."""
+async def _start_elimination_roll(col, roll_doc: dict) -> None:
+    """Flip a scheduled elimination roll to 'spinning' and prime its
+    elimination clock. Idempotent: a second worker that loses the race is
+    a no-op."""
+    roll_id = roll_doc["id"]
     now = datetime.now(timezone.utc)
 
-    # 10-minute reminder: scheduled_at between 9m30s and 10m30s away, not yet warned.
+    try:
+        roll = DevRoll.model_validate(roll_doc)
+    except Exception:
+        logger.exception(f"[dev_roll] could not parse roll {roll_id}")
+        return
+
+    interval = roll.elimination_interval_secs or MIN_ELIM_INTERVAL_SECS
+    survivors = [e.id for e in roll.entries]
+    next_at = now + timedelta(seconds=interval)
+
+    result = await col.update_one(
+        {"id": roll_id, "phase": "scheduled"},
+        {"$set": {
+            "phase": "spinning",
+            "spin_started_at": now,
+            "survivors": survivors,
+            "eliminated": [],
+            "next_elimination_at": next_at,
+        }},
+    )
+    if getattr(result, "matched_count", 0) == 0:
+        return  # lost the race
+
+    logger.info(
+        f"[dev_roll] elimination started for {roll_id} "
+        f"({len(survivors)} entries, interval={interval}s)"
+    )
+    asyncio.create_task(announce_dev_roll_spinning(
+        title=roll.title,
+        pot_sol=roll.pot_sol,
+        wallet_count=len(survivors),
+    ))
+
+
+async def _tick_elimination_roll(col, roll_doc: dict) -> None:
+    """Elimination tick: pick one survivor uniformly at random and remove
+    them. If a single survivor remains afterward, transition to resolved.
+    Race-safe via a $set guarded by the prior next_elimination_at value."""
+    roll_id = roll_doc["id"]
+    now = datetime.now(timezone.utc)
+
+    try:
+        roll = DevRoll.model_validate(roll_doc)
+    except Exception:
+        logger.exception(f"[dev_roll] could not parse roll {roll_id}")
+        return
+
+    if not roll.survivors or len(roll.survivors) < 2:
+        # Nothing to eliminate — or already down to 1 (shouldn't happen, but
+        # handle defensively by resolving).
+        if roll.survivors and len(roll.survivors) == 1 and not roll.winner_entry_id:
+            await _finalize_winner(col, roll, roll.survivors[0], now)
+        return
+
+    rng = secrets.SystemRandom()
+    loser_id = rng.choice(roll.survivors)
+    new_survivors = [s for s in roll.survivors if s != loser_id]
+    interval = roll.elimination_interval_secs or MIN_ELIM_INTERVAL_SECS
+    elim_event = EliminationEvent(
+        entry_id=loser_id,
+        eliminated_at=now,
+        position=len(roll.eliminated) + 1,
+    ).model_dump()
+
+    if len(new_survivors) == 1:
+        # Final elimination — winner emerges.
+        winner_id = new_survivors[0]
+        winner_entry = next((e for e in roll.entries if e.id == winner_id), None)
+        update = {
+            "$set": {
+                "survivors": new_survivors,
+                "phase": "resolved",
+                "winner_entry_id": winner_id,
+                "winner": _entry_label(winner_entry) if winner_entry else None,
+                "resolved_at": now,
+                "next_elimination_at": None,
+            },
+            "$push": {"eliminated": elim_event},
+        }
+        result = await col.update_one(
+            {"id": roll_id, "phase": "spinning",
+             "next_elimination_at": roll.next_elimination_at},
+            update,
+        )
+        if getattr(result, "matched_count", 0) == 0:
+            return
+        logger.info(
+            f"[dev_roll] elimination resolved {roll_id} -> "
+            f"{_entry_label(winner_entry) if winner_entry else winner_id}"
+        )
+        if winner_entry:
+            asyncio.create_task(announce_dev_roll_winner(
+                title=roll.title,
+                winner_wallet=winner_entry.wallet or _entry_label(winner_entry),
+                pot_sol=roll.pot_sol,
+            ))
+            asyncio.create_task(announce_buy_cta())
+    else:
+        update = {
+            "$set": {
+                "survivors": new_survivors,
+                "next_elimination_at": now + timedelta(seconds=interval),
+            },
+            "$push": {"eliminated": elim_event},
+        }
+        result = await col.update_one(
+            {"id": roll_id, "phase": "spinning",
+             "next_elimination_at": roll.next_elimination_at},
+            update,
+        )
+        if getattr(result, "matched_count", 0) == 0:
+            return
+        logger.info(
+            f"[dev_roll] elimination tick {roll_id}: "
+            f"{len(roll.survivors)} -> {len(new_survivors)} (out: {loser_id[:8]})"
+        )
+
+
+async def _finalize_winner(col, roll: DevRoll, winner_id: str, now: datetime) -> None:
+    """Defensive helper for the edge case where survivors collapses to 1
+    without a final elimination tick (e.g., bad data). Idempotent."""
+    winner_entry = next((e for e in roll.entries if e.id == winner_id), None)
+    await col.update_one(
+        {"id": roll.id, "phase": "spinning"},
+        {"$set": {
+            "phase": "resolved",
+            "winner_entry_id": winner_id,
+            "winner": _entry_label(winner_entry) if winner_entry else None,
+            "resolved_at": now,
+            "next_elimination_at": None,
+        }},
+    )
+
+
+async def run_due_rolls(col) -> int:
+    """Scheduler tick. Fires due single rolls, starts due elimination rolls,
+    advances elimination rolls whose next tick has arrived, and sends the
+    10-minute reminder for upcoming rolls. Returns approximate work done."""
+    now = datetime.now(timezone.utc)
+
+    # 10-minute reminder window.
     reminder_lo = now + timedelta(seconds=570)
     reminder_hi = now + timedelta(seconds=630)
     unwarneds = col.find({
@@ -348,26 +684,50 @@ async def run_due_rolls(col) -> int:
         "ten_min_warned": False,
         "scheduled_at": {"$gte": reminder_lo, "$lte": reminder_hi},
     }).limit(5)
-    for roll in await unwarneds.to_list(5):
-        await col.update_one({"id": roll["id"]}, {"$set": {"ten_min_warned": True}})
+    for doc in await unwarneds.to_list(5):
+        await col.update_one({"id": doc["id"]}, {"$set": {"ten_min_warned": True}})
+        try:
+            count = len(doc.get("entries") or doc.get("wallets") or [])
+        except Exception:
+            count = 0
         asyncio.create_task(announce_dev_roll_reminder(
-            title=roll.get("title"),
-            pot_sol=roll["pot_sol"],
-            wallet_count=len(roll.get("wallets", [])),
+            title=doc.get("title"),
+            pot_sol=doc.get("pot_sol", 0.0),
+            wallet_count=count,
         ))
 
-    cur = col.find({"phase": "scheduled", "scheduled_at": {"$lte": now}}).limit(5)
-    due = await cur.to_list(5)
-    if not due:
-        return 0
-    # Run them sequentially — there should rarely be more than one and the
-    # animation sleep would overlap awkwardly otherwise.
-    for roll in due:
+    work = 0
+
+    # 1) Newly-due scheduled rolls — fire by mode.
+    due_cur = col.find({
+        "phase": "scheduled",
+        "scheduled_at": {"$lte": now},
+    }).limit(5)
+    for doc in await due_cur.to_list(5):
         try:
-            await _resolve_one_roll(col, roll)
+            mode = doc.get("mode", "single")
+            if mode == "elimination":
+                await _start_elimination_roll(col, doc)
+            else:
+                await _resolve_single_roll(col, doc)
+            work += 1
         except Exception:
-            logger.exception(f"[dev_roll] failed to resolve roll {roll.get('id')}")
-    return len(due)
+            logger.exception(f"[dev_roll] failed to start roll {doc.get('id')}")
+
+    # 2) Elimination rolls that have ticked.
+    tick_cur = col.find({
+        "phase": "spinning",
+        "mode": "elimination",
+        "next_elimination_at": {"$ne": None, "$lte": now},
+    }).limit(5)
+    for doc in await tick_cur.to_list(5):
+        try:
+            await _tick_elimination_roll(col, doc)
+            work += 1
+        except Exception:
+            logger.exception(f"[dev_roll] failed to tick roll {doc.get('id')}")
+
+    return work
 
 
 async def dev_scheduler_loop(get_col) -> None:
