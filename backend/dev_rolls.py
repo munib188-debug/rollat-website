@@ -552,15 +552,20 @@ async def cancel_dev_roll(col, roll_id: str) -> dict:
     return _normalize_doc(updated)
 
 
-async def fetch_current_dev_roll(col) -> Optional[dict]:
+async def fetch_current_dev_roll(col, *, linger_secs: Optional[int] = None) -> Optional[dict]:
     """Returns the roll the public page should display, or None if there's
-    nothing to show. Includes resolved rolls for a brief lingering window so
-    the winner card stays visible after the spin lands."""
+    nothing to show. Includes resolved rolls for a lingering window so the
+    winner card stays visible after the spin lands.
+
+    `linger_secs` overrides the module default (used by server.py to thread
+    the runtime-config value through). Falls back to RESOLVED_DISPLAY_SECS
+    when not provided."""
     doc = await col.find_one({"phase": {"$in": ["scheduled", "spinning"]}})
     if doc:
         return _normalize_doc(doc)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=RESOLVED_DISPLAY_SECS)
+    secs = int(linger_secs) if linger_secs is not None else RESOLVED_DISPLAY_SECS
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=secs)
     cur = col.find({"phase": "resolved", "resolved_at": {"$gte": cutoff}}).sort("resolved_at", -1).limit(1)
     docs = await cur.to_list(1)
     return _normalize_doc(docs[0]) if docs else None

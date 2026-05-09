@@ -241,6 +241,8 @@ function ConfigSection() {
         streak_month_threshold: r.data.current.streak_month_threshold ?? 30,
         streak_grace_days: r.data.current.streak_grace_days ?? 1,
         max_bonus_tickets: r.data.current.max_bonus_tickets ?? 10,
+        // Edited as hours in the UI for ergonomics; stored as seconds.
+        resolved_display_hours: ((r.data.current.resolved_display_secs ?? 86400) / 3600).toString(),
       });
     } catch (err) {
       toast.error("Could not load config", { description: err?.response?.data?.detail || err?.message });
@@ -268,6 +270,12 @@ function ConfigSection() {
       payload.streak_month_threshold = Number(draft.streak_month_threshold);
       payload.streak_grace_days = Number(draft.streak_grace_days);
       payload.max_bonus_tickets = Number(draft.max_bonus_tickets);
+
+      // Convert hours back to seconds for the API.
+      const hrs = Number(draft.resolved_display_hours);
+      if (Number.isFinite(hrs) && hrs > 0) {
+        payload.resolved_display_secs = Math.round(hrs * 3600);
+      }
 
       const r = await api.patch("/admin/config", payload);
       setCfg(r.data.current);
@@ -316,6 +324,15 @@ function ConfigSection() {
             placeholder="e.g. 1000000"
             currentLabel={Number(cfg?.min_qualifying_tokens || 0).toLocaleString()}
             defaultLabel={Number(defaults?.min_qualifying_tokens || 0).toLocaleString()}
+          />
+          <ConfigField
+            label="Winner Display Window (hours)"
+            hint="How long a resolved Dev Roll or Guest Roll stays visible on the public page after it finishes. Applies to all rolls. Min 0.02h (~1 min), max 168h (7 days)."
+            value={draft.resolved_display_hours}
+            onChange={(v) => setDraft((d) => ({ ...d, resolved_display_hours: v }))}
+            placeholder="e.g. 24"
+            currentLabel={`${((cfg?.resolved_display_secs ?? 86400) / 3600).toFixed(2)} h`}
+            defaultLabel={`${((defaults?.resolved_display_secs ?? 86400) / 3600).toFixed(2)} h`}
           />
 
           <div className="border-t border-white/5 pt-5 mt-2">

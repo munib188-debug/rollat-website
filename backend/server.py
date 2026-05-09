@@ -454,6 +454,10 @@ def _runtime_defaults() -> dict:
         "tg_announcements_enabled": True,
         "tg_event_disabled": [],
         "tg_templates": {},
+        # How long a resolved Dev Roll / Guest Roll lingers on the public site
+        # after it finishes (seconds). Default 24h. Applies to both roll types.
+        # 60s minimum, 7d maximum.
+        "resolved_display_secs": 86400,
     }
 
 
@@ -503,6 +507,11 @@ async def get_runtime_config(force_refresh: bool = False) -> dict:
             cfg["tg_templates"] = {
                 str(k): str(v) for k, v in doc["tg_templates"].items() if isinstance(v, str)
             }
+        if "resolved_display_secs" in doc and doc["resolved_display_secs"] is not None:
+            try:
+                cfg["resolved_display_secs"] = int(doc["resolved_display_secs"])
+            except (TypeError, ValueError):
+                pass
         cfg["updated_at"] = doc.get("updated_at")
         cfg["updated_by"] = doc.get("updated_by")
 
@@ -1039,6 +1048,17 @@ async def admin_patch_config(payload: dict, admin: str = Depends(get_admin_walle
             seen_e.add(n)
             cleaned_events.append(n)
         update["tg_event_disabled"] = cleaned_events
+
+    if "resolved_display_secs" in payload:
+        try:
+            n = int(payload["resolved_display_secs"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="resolved_display_secs must be an integer (seconds)")
+        # 60s floor, 7d ceiling — anything shorter feels broken; anything longer
+        # is effectively "forever" on a daily-cadence project.
+        if n < 60 or n > 7 * 24 * 3600:
+            raise HTTPException(status_code=400, detail="resolved_display_secs must be between 60 and 604800")
+        update["resolved_display_secs"] = n
 
     if "tg_templates" in payload:
         raw = payload["tg_templates"]
@@ -1675,7 +1695,11 @@ async def dev_roll_create(req: DevRollCreateRequest, admin: str = Depends(get_ad
 @api_router.get("/dev/roll/current")
 async def dev_roll_current():
     """Public — returns the active or recently-resolved dev roll, or null."""
-    return await fetch_current_dev_roll(_get_col("dev_rolls"))
+    cfg = await get_runtime_config()
+    return await fetch_current_dev_roll(
+        _get_col("dev_rolls"),
+        linger_secs=cfg.get("resolved_display_secs"),
+    )
 
 
 @api_router.get("/dev/roll/{roll_id}")
@@ -1840,7 +1864,11 @@ async def guest_roll_create(req: GuestRollCreateRequest, admin: str = Depends(ge
 
 @api_router.get("/guest/roll/current")
 async def guest_roll_current():
-    return await fetch_current_guest_roll(_get_col("guest_rolls"))
+    cfg = await get_runtime_config()
+    return await fetch_current_guest_roll(
+        _get_col("guest_rolls"),
+        linger_secs=cfg.get("resolved_display_secs"),
+    )
 
 
 @api_router.patch("/guest/roll/{roll_id}")

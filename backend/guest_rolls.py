@@ -256,11 +256,14 @@ async def cancel_guest_roll(col, roll_id: str) -> dict:
     return _normalize_doc(await col.find_one({"id": roll_id}))
 
 
-async def fetch_current_guest_roll(col) -> Optional[dict]:
+async def fetch_current_guest_roll(col, *, linger_secs: Optional[int] = None) -> Optional[dict]:
+    """`linger_secs` overrides the module-default linger window (used by
+    server.py to plumb in the runtime-config value)."""
     doc = await col.find_one({"phase": {"$in": ["scheduled", "spinning"]}})
     if doc:
         return _normalize_doc(doc)
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=RESOLVED_DISPLAY_SECS)
+    secs = int(linger_secs) if linger_secs is not None else RESOLVED_DISPLAY_SECS
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=secs)
     cur = col.find({"phase": "resolved", "resolved_at": {"$gte": cutoff}}).sort("resolved_at", -1).limit(1)
     docs = await cur.to_list(1)
     return _normalize_doc(docs[0]) if docs else None
