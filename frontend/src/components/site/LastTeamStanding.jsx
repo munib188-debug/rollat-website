@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Skull, Trophy, Users, X, Wallet, Twitter, Check } from "lucide-react";
+import { Skull, Trophy, Users, X, Wallet, Twitter, Check, Clock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -59,16 +59,70 @@ export default function LastTeamStanding({ roll }) {
   const [signupTeamId, setSignupTeamId] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  if (phase === "resolved") {
+  // Defer the resolved-view transition until the wheel's final spin + reveal
+  // animation completes. Without this, the moment the last 2 → 1 elimination
+  // tick lands the wheel unmounts and the user sees the winner card with no
+  // wheel animation in between. We wait `WHEEL_REVEAL_HOLD_MS` after the
+  // most recent elimination event before flipping to the resolved view.
+  const WHEEL_REVEAL_HOLD_MS = 9000; // SPIN_MS (5.2s) + reveal hold (3.4s) + small buffer
+  const [resolvedReady, setResolvedReady] = useState(phase === "resolved");
+  const lastElimCountRef = useRef(roll.eliminated?.length || 0);
+
+  useEffect(() => {
+    const count = roll.eliminated?.length || 0;
+    if (phase === "resolved") {
+      if (count > lastElimCountRef.current) {
+        // Fresh resolve — keep the wheel showing while it animates out.
+        setResolvedReady(false);
+        const t = setTimeout(() => setResolvedReady(true), WHEEL_REVEAL_HOLD_MS);
+        lastElimCountRef.current = count;
+        return () => clearTimeout(t);
+      }
+      // Page reload after the resolution already happened — show winner immediately.
+      setResolvedReady(true);
+    } else {
+      setResolvedReady(false);
+    }
+    lastElimCountRef.current = count;
+  }, [phase, roll.eliminated?.length]);
+
+  // NOTE: hooks must run in the same order on every render — the
+  // teamsBelowCap useMemo lives BEFORE the early return below.
+  const minBackers = roll.min_backers_per_team || 0;
+  const teamsBelowCap = useMemo(() => {
+    if (minBackers <= 0 || !roll.entries) return [];
+    return roll.entries
+      .map((e) => ({ entry: e, count: supportersByTeam[e.id] ?? 0 }))
+      .filter((t) => t.count < minBackers);
+  }, [roll.entries, supportersByTeam, minBackers]);
+
+  if (phase === "resolved" && resolvedReady) {
     return <TournamentResolved roll={roll} />;
   }
+
+  // Should we keep the wheel mounted? Yes during spin AND during the
+  // post-final-tick window where phase == resolved but the animation
+  // hasn't played out yet.
+  const showWheel = phase === "spinning" || (phase === "resolved" && !resolvedReady);
+
+  const scheduledMs = roll.scheduled_at ? new Date(roll.scheduled_at).getTime() : null;
+  const scheduledPassed = scheduledMs ? Date.now() >= scheduledMs : false;
+  const waitingForBackers = phase === "scheduled" && scheduledPassed && teamsBelowCap.length > 0;
 
   return (
     <>
       <div className="space-y-6" data-testid="last-team-standing">
         <Banner roll={roll} totalSupporters={total} />
 
-        {phase === "scheduled" && <ScheduledCountdown roll={roll} />}
+        {phase === "scheduled" && !waitingForBackers && (
+          <ScheduledCountdown roll={roll} minBackers={minBackers} />
+        )}
+        {waitingForBackers && (
+          <WaitingForBackers
+            minBackers={minBackers}
+            teamsBelowCap={teamsBelowCap}
+          />
+        )}
 
         {my && (
           <MyStatusPill
@@ -80,7 +134,7 @@ export default function LastTeamStanding({ roll }) {
           />
         )}
 
-        {phase === "spinning" && (
+        {showWheel && (
           <TournamentWheel
             roll={roll}
             eliminatedSet={eliminatedSet}
@@ -158,7 +212,7 @@ function Banner({ roll, totalSupporters }) {
   );
 }
 
-function ScheduledCountdown({ roll }) {
+function ScheduledCountdown({ roll, minBackers }) {
   const t = useCountdown(roll.scheduled_at);
   return (
     <div className="glass rounded-sm p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -167,6 +221,11 @@ function ScheduledCountdown({ roll }) {
           Wheel starts (sign-ups close)
         </div>
         <div className="text-xs text-white/55">{new Date(roll.scheduled_at).toUTCString()}</div>
+        {minBackers > 0 && (
+          <div className="text-[10px] uppercase tracking-[0.25em] font-mono text-gold/80 mt-2">
+            Min {minBackers} backer{minBackers === 1 ? "" : "s"} per team — start is held until met
+          </div>
+        )}
       </div>
       <div className="flex items-end gap-3 font-mono">
         {[
@@ -185,6 +244,61 @@ function ScheduledCountdown({ roll }) {
             {i < 3 && <span className="text-xl text-white/20 pb-1">:</span>}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shown when the scheduled start time has arrived but the per-team backer
+ * cap isn't met yet — the backend is holding the start until conditions
+ * are met. We list which teams still need backers.
+ */
+function WaitingForBackers({ minBackers, teamsBelowCap }) {
+  return (
+    <div
+      className="rounded-sm p-5 md:p-6 border bg-gold/[0.04]"
+      style={{ borderColor: "#FFD70055" }}
+      data-testid="waiting-for-backers"
+    >
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 w-9 h-9 rounded-sm flex items-center justify-center bg-gold/15">
+          <Clock className="w-4 h-4" style={{ color: "#FFD700" }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-1" style={{ color: "#FFD700" }}>
+            Waiting for backers
+          </div>
+          <div className="font-display font-bold text-lg md:text-xl text-white tracking-tight mb-1">
+            Start is held until every team reaches {minBackers} backer{minBackers === 1 ? "" : "s"}.
+          </div>
+          <div className="text-[12px] text-white/55 mb-4">
+            Sign-ups are still open below. The wheel auto-fires the moment the
+            cap is met.
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {teamsBelowCap.map(({ entry, count }) => (
+              <div
+                key={entry.id}
+                className="flex items-center gap-2 p-2 rounded-sm bg-obsidian-950/60 border border-white/10"
+              >
+                {entry.image_data_url && (
+                  <div className="w-8 h-8 rounded-sm overflow-hidden bg-obsidian-950 shrink-0">
+                    <img src={entry.image_data_url} alt={entry.name} className="w-full h-full object-cover" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="font-display font-bold text-xs text-white truncate">{entry.name}</div>
+                  <div className="font-mono text-[10px] text-white/55">
+                    <span style={{ color: "#FFD700" }}>{count}</span>
+                    <span className="text-white/35"> / {minBackers}</span>
+                  </div>
+                </div>
+                <AlertTriangle className="w-3 h-3 text-gold/60 shrink-0" />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

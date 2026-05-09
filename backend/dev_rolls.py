@@ -131,6 +131,10 @@ class DevRoll(BaseModel):
     # Populated on resolve when is_tournament=True. Frontend reads this for
     # the supporter list + per-wallet share. Never set on non-tournament rolls.
     tournament_payout: Optional[dict] = None
+    # Tournament gate: the wheel won't start until every team has at least
+    # this many supporters, even if scheduled_at has passed. 0 = no gate.
+    # Only meaningful when is_tournament=True.
+    min_backers_per_team: int = 0
 
     entries: List[RollEntry] = Field(default_factory=list)
     survivors: List[str] = Field(default_factory=list)        # entry IDs still in
@@ -378,6 +382,7 @@ async def create_dev_roll(
     scheduled_at: datetime,
     created_by: str,
     is_tournament: bool = False,
+    min_backers_per_team: int = 0,
 ) -> dict:
     if entry_type not in ("wallet", "custom"):
         raise HTTPException(status_code=400, detail="entry_type must be 'wallet' or 'custom'")
@@ -416,6 +421,17 @@ async def create_dev_roll(
             if n in seen_names:
                 raise HTTPException(status_code=400, detail=f"duplicate team name: {e.name}")
             seen_names.add(n)
+        # Min backers gate — 0 = off, max 50 (sanity cap so admins can't
+        # accidentally set it to 1000 and brick the start forever).
+        try:
+            min_backers_per_team = int(min_backers_per_team or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="min_backers_per_team must be an integer")
+        if min_backers_per_team < 0 or min_backers_per_team > 50:
+            raise HTTPException(status_code=400, detail="min_backers_per_team must be between 0 and 50")
+    else:
+        # Ignore the field for non-tournament rolls.
+        min_backers_per_team = 0
 
     try:
         pot_value = float(pot_sol)
@@ -438,6 +454,7 @@ async def create_dev_roll(
         mode=mode,
         elimination_interval_secs=elimination_interval_secs,
         is_tournament=bool(is_tournament),
+        min_backers_per_team=min_backers_per_team,
         entries=cleaned_entries,
         pot_sol=pot_value,
         scheduled_at=sched,
@@ -655,7 +672,12 @@ async def _resolve_single_roll(col, roll_doc: dict) -> None:
 async def _start_elimination_roll(col, roll_doc: dict) -> None:
     """Flip a scheduled elimination roll to 'spinning' and prime its
     elimination clock. Idempotent: a second worker that loses the race is
-    a no-op."""
+    a no-op.
+
+    For tournaments with `min_backers_per_team > 0`, the start is gated:
+    if any team is below the cap, this is a no-op and the scheduler will
+    re-check on the next tick. The roll stays in `scheduled` phase
+    indefinitely until conditions are met."""
     roll_id = roll_doc["id"]
     now = datetime.now(timezone.utc)
 
@@ -664,6 +686,20 @@ async def _start_elimination_roll(col, roll_doc: dict) -> None:
     except Exception:
         logger.exception(f"[dev_roll] could not parse roll {roll_id}")
         return
+
+    # Tournament min-backer gate.
+    if roll.is_tournament and roll.min_backers_per_team > 0 and _tournament_store is not None:
+        try:
+            counts = await _tournament_store.supporters_by_team(roll_id)
+        except Exception:
+            logger.exception(f"[dev_roll] supporter-count check failed for {roll_id}")
+            counts = {}
+        below = [e for e in roll.entries if counts.get(e.id, 0) < roll.min_backers_per_team]
+        if below:
+            # Quietly hold the start. The scheduler ticks every 3s and will
+            # re-evaluate; once every team meets the cap, the next tick
+            # transitions to spinning.
+            return
 
     interval = roll.elimination_interval_secs or MIN_ELIM_INTERVAL_SECS
     survivors = [e.id for e in roll.entries]

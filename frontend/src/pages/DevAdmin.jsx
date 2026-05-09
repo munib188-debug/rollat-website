@@ -92,6 +92,7 @@ export default function DevAdmin() {
   const [intervalValue, setIntervalValue] = useState("5");
   const [intervalUnit, setIntervalUnit] = useState("minutes");
   const [isTournament, setIsTournament] = useState(false);
+  const [minBackers, setMinBackers] = useState("0");
   const [schedMode, setSchedMode] = useState("timer");
   const [timerHours, setTimerHours] = useState("1");
   const [timerMinutes, setTimerMinutes] = useState("0");
@@ -145,6 +146,8 @@ export default function DevAdmin() {
     setTimerHours("1");
     setTimerMinutes("0");
     setScheduledAt("");
+    setIsTournament(false);
+    setMinBackers("0");
   };
 
   const handleSubmit = async () => {
@@ -174,6 +177,7 @@ export default function DevAdmin() {
     }
 
     // Last Team Standing requires elimination + custom + 3-20 teams.
+    let minBackersInt = 0;
     if (isTournament) {
       if (mode !== "elimination" || entryType !== "custom") {
         toast.error("Tournament needs Elimination mode + Custom entries");
@@ -181,6 +185,11 @@ export default function DevAdmin() {
       }
       if (entriesPayload.length < 3 || entriesPayload.length > 20) {
         toast.error("Tournament needs 3–20 teams");
+        return;
+      }
+      minBackersInt = Math.max(0, parseInt(minBackers) || 0);
+      if (minBackersInt > 50) {
+        toast.error("Min backers per team can't exceed 50");
         return;
       }
     }
@@ -206,6 +215,7 @@ export default function DevAdmin() {
         pot_sol: potNum,
         scheduled_at: iso,
         is_tournament: isTournament,
+        min_backers_per_team: minBackersInt,
       });
       toast.success("Dev roll scheduled");
       resetForm();
@@ -343,6 +353,7 @@ export default function DevAdmin() {
               intervalValue={intervalValue} setIntervalValue={setIntervalValue}
               intervalUnit={intervalUnit} setIntervalUnit={setIntervalUnit}
               isTournament={isTournament} setIsTournament={setIsTournament}
+              minBackers={minBackers} setMinBackers={setMinBackers}
               schedMode={schedMode} setSchedMode={setSchedMode}
               timerHours={timerHours} setTimerHours={setTimerHours}
               timerMinutes={timerMinutes} setTimerMinutes={setTimerMinutes}
@@ -389,6 +400,7 @@ function SetupForm({
   intervalValue, setIntervalValue,
   intervalUnit, setIntervalUnit,
   isTournament, setIsTournament,
+  minBackers, setMinBackers,
   schedMode, setSchedMode,
   timerHours, setTimerHours,
   timerMinutes, setTimerMinutes,
@@ -538,6 +550,31 @@ function SetupForm({
                           </span>
                         )}
                       </div>
+
+                      {/* Min backers per team — only relevant when the tournament
+                          flag is on. 0 = no gate (start fires at scheduled_at). */}
+                      {isTournament && (
+                        <div className="mt-3 pt-3 border-t border-crimson/20">
+                          <div className="text-[10px] uppercase tracking-widest font-mono text-crimson/80 mb-1.5">
+                            Min Backers Per Team (start gate)
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Input
+                              value={minBackers}
+                              onChange={(e) => setMinBackers(e.target.value.replace(/\D/g, ""))}
+                              type="number" min="0" max="50"
+                              placeholder="0"
+                              className="bg-obsidian-950/80 border-white/10 text-white font-mono h-9 rounded-sm w-24"
+                              data-testid="dev-admin-min-backers"
+                            />
+                            <span className="text-[11px] text-white/45 leading-relaxed">
+                              {Number(minBackers) > 0
+                                ? <>The wheel won't start until <span className="text-crimson font-bold">every team</span> has at least <span className="text-crimson font-bold">{minBackers}</span> backer{Number(minBackers) === 1 ? "" : "s"}, even after the scheduled time. Sign-ups stay open until met.</>
+                                : <>0 = no gate. Tournament starts on schedule regardless of backer counts.</>}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </label>
                 </div>

@@ -1639,6 +1639,9 @@ class DevRollCreateRequest(BaseModel):
     # Last Team Standing tournament: requires entry_type=custom + mode=elimination.
     # When True, public users can sign up to back a team.
     is_tournament: bool = False
+    # Tournament gate — minimum backers per team required to start the wheel.
+    # 0 disables the gate; max 50.
+    min_backers_per_team: int = 0
 
 
 class DevRollUpdateRequest(BaseModel):
@@ -1690,6 +1693,7 @@ async def dev_roll_create(req: DevRollCreateRequest, admin: str = Depends(get_ad
         scheduled_at=sched,
         created_by=admin,
         is_tournament=req.is_tournament,
+        min_backers_per_team=req.min_backers_per_team,
     )
 
 
