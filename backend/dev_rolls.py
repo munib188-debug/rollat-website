@@ -609,10 +609,25 @@ async def _tick_elimination_roll(col, roll_doc: dict) -> None:
         return
 
     if not roll.survivors or len(roll.survivors) < 2:
-        # Nothing to eliminate — or already down to 1 (shouldn't happen, but
-        # handle defensively by resolving).
+        # Nothing to eliminate — or already down to 1.  Defensive recovery:
+        #   1 survivor → finalize as the winner (shouldn't normally hit; the
+        #     final-elimination branch below handles the regular path).
+        #   0 survivors → roll is corrupt; force-resolve with no winner so
+        #     the scheduler stops re-querying it forever.
         if roll.survivors and len(roll.survivors) == 1 and not roll.winner_entry_id:
             await _finalize_winner(col, roll, roll.survivors[0], now)
+        elif not roll.survivors and not roll.winner_entry_id:
+            logger.warning(f"[dev_roll] {roll_id} has empty survivors — force-resolving with no winner")
+            await col.update_one(
+                {"id": roll_id, "phase": "spinning"},
+                {"$set": {
+                    "phase": "resolved",
+                    "winner": None,
+                    "winner_entry_id": None,
+                    "resolved_at": now,
+                    "next_elimination_at": None,
+                }},
+            )
         return
 
     rng = secrets.SystemRandom()
@@ -641,7 +656,7 @@ async def _tick_elimination_roll(col, roll_doc: dict) -> None:
             "$push": {"eliminated": elim_event},
         }
         result = await col.update_one(
-            {"id": roll_id, "phase": "spinning",
+            {"id": roll_id, "phase": "spinning", "mode": "elimination",
              "next_elimination_at": roll.next_elimination_at},
             update,
         )
@@ -668,7 +683,7 @@ async def _tick_elimination_roll(col, roll_doc: dict) -> None:
             "$push": {"eliminated": elim_event},
         }
         result = await col.update_one(
-            {"id": roll_id, "phase": "spinning",
+            {"id": roll_id, "phase": "spinning", "mode": "elimination",
              "next_elimination_at": roll.next_elimination_at},
             update,
         )

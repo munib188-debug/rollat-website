@@ -16,7 +16,7 @@ const faqs = [
   },
   {
     q: "How does the long-term holder bonus work?",
-    a: "On top of your base tickets, you earn bonus tickets the longer you stay qualified. +1 ticket at 7 consecutive days qualified, then +1 every additional 30 days (so 30d → +2, 60d → +3, 90d → +4, …). One missed snapshot is forgiven; two breaks the streak. Bonus tickets stack on top of the base 6-ticket cap, so a long-term whale can have more than 6 entries in the wheel.",
+    a: "On top of your base tickets, you earn bonus tickets the longer you stay qualified. +1 ticket at 7 consecutive days qualified, then +1 every additional 30 days (so 30d → +2, 60d → +3, 90d → +4, …) capped at +10 bonus tickets total (~9 months of unbroken holding). The streak survives a single missed round — your grace allowance refreshes whenever you re-qualify cleanly — but missing two rounds in a row resets it to zero. Bonus tickets stack on top of the base 6-ticket cap, so the absolute maximum any wallet can have in the wheel is 16 entries (6 base + 10 bonus).",
   },
   {
     q: "How does the payout work?",

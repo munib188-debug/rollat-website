@@ -124,9 +124,14 @@ class StreakStore:
                 continue
 
             if gap == 1:
-                # Consecutive round.
+                # Consecutive round. Re-earn the grace allowance: as long as
+                # the wallet keeps qualifying without missing, we treat each
+                # uninterrupted run after the last grace event as fresh —
+                # so a miss two months from now can still be bridged. This
+                # matches how players read the rule ("one missed round is
+                # forgiven") rather than "one miss ever in this streak".
                 current_streak += 1
-                # grace_used stays as-is; it's tied to this streak run
+                grace_used = None
             elif gap == 2 and grace_days >= 1 and grace_used is None:
                 # Bridge a single missed round using the grace allowance.
                 current_streak += 1

@@ -115,7 +115,8 @@ export default function WalletCheck() {
             </div>
             <p className="text-white/60 text-[13px] leading-relaxed mb-3">
               On top of base tickets, every qualified wallet earns <span className="text-gold font-semibold">+1 ticket at 7 consecutive days</span>,
-              then <span className="text-gold font-semibold">+1 every 30 days after</span>. One missed snapshot is forgiven; two breaks the streak.
+              then <span className="text-gold font-semibold">+1 every 30 days after</span>, capped at <span className="text-gold font-semibold">+10 bonus tickets</span>.
+              One missed round is forgiven; two in a row breaks the streak.
             </p>
             <div className="grid grid-cols-4 gap-2 font-mono text-[10px] uppercase tracking-widest text-white/45">
               <div className="text-center border border-white/10 rounded-sm py-1.5">7d <span className="text-gold">+1</span></div>

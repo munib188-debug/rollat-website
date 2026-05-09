@@ -13,14 +13,20 @@ export function useDevRoll() {
   const [roll, setRoll] = useState(null);
   const [loading, setLoading] = useState(true);
   const phaseRef = useRef(null);
+  const modeRef = useRef(null);
   const mountedRef = useRef(true);
   const timerRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
 
-    const cadenceMs = (phase) => {
-      if (phase === "spinning") return 1000;
+    const cadenceMs = (phase, mode) => {
+      // Single-mode spin animates over ~9s and we want the resolve to land
+      // promptly, so poll at 1s.  Elimination rolls progress on a slower
+      // server-side clock (eliminations are minutes/hours apart) and may
+      // carry heavy custom-entry image payloads — poll at 3s to cut
+      // bandwidth ~3× without making the UI feel stale.
+      if (phase === "spinning") return mode === "elimination" ? 3000 : 1000;
       if (phase === "resolved") return 2000;
       return 5000;
     };
@@ -32,6 +38,7 @@ export function useDevRoll() {
         const data = r.data || null;
         setRoll(data);
         phaseRef.current = data?.phase || null;
+        modeRef.current = data?.mode || null;
       } catch (_) {
         // Network/cold-start errors are non-fatal; keep showing last good state.
       } finally {
@@ -43,7 +50,7 @@ export function useDevRoll() {
       timerRef.current = setTimeout(async () => {
         await tick();
         if (mountedRef.current) loop();
-      }, cadenceMs(phaseRef.current));
+      }, cadenceMs(phaseRef.current, modeRef.current));
     };
 
     tick().then(loop);
