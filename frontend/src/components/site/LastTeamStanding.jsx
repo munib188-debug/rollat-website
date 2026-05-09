@@ -83,8 +83,9 @@ export default function LastTeamStanding({ roll }) {
         {phase === "spinning" && (
           <TournamentWheel
             roll={roll}
-            entryMap={entryMap}
             eliminatedSet={eliminatedSet}
+            supportersByTeam={supportersByTeam}
+            myTeamId={my?.team_entry_id || null}
           />
         )}
 
