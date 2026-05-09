@@ -87,16 +87,29 @@ async def announce_dev_roll_winner(
     title: str | None,
     winner_wallet: str,
     pot_sol: float,
+    *,
+    is_wallet: bool = True,
 ) -> None:
+    """Announce a dev roll winner. For wallet-typed rolls (`is_wallet=True`)
+    we include a Solscan deep link; for custom (name+photo) rolls we skip
+    the link since the 'winner' value is a display name, not an address."""
     label = title or "Dev Roll"
-    explorer = f"https://solscan.io/account/{winner_wallet}"
-    await _send(
-        f"🏆 *{label} — Winner\\!*\n"
-        f"🎯 `{winner_wallet}`\n"
-        f"💰 `{pot_sol} SOL`\n"
-        f"[View on Solscan]({explorer})\n\n"
-        f"{SITE}"
-    )
+    if is_wallet:
+        explorer = f"https://solscan.io/account/{winner_wallet}"
+        await _send(
+            f"🏆 *{label} — Winner\\!*\n"
+            f"🎯 `{winner_wallet}`\n"
+            f"💰 `{pot_sol} SOL`\n"
+            f"[View on Solscan]({explorer})\n\n"
+            f"{SITE}"
+        )
+    else:
+        await _send(
+            f"🏆 *{label} — Winner\\!*\n"
+            f"🎯 `{winner_wallet}`\n"
+            f"💰 `{pot_sol} SOL`\n\n"
+            f"{SITE}/#dev-roll"
+        )
 
 
 # ── Reminder / rollover announcements ──────────────────────────────────────

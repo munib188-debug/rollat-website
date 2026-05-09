@@ -158,19 +158,28 @@ class NonceStore:
         )
 
     async def consume(self, address: str, nonce: str) -> Optional[dict]:
-        """Atomically delete + return the nonce doc if valid; None if missing/expired."""
-        doc = await self.coll.find_one({"address": address, "nonce": nonce})
+        """Atomically delete + return the nonce doc if valid; None if missing/expired.
+
+        Uses Mongo's findAndModify (find_one_and_delete) so two concurrent
+        verify requests can't both pull the same nonce — at most one wins
+        the document, the other gets None and fails verification."""
+        try:
+            doc = await self.coll.find_one_and_delete({"address": address, "nonce": nonce})
+        except Exception:
+            # In-memory fallbacks may not support find_one_and_delete; degrade
+            # gracefully but still avoid the obvious double-read window.
+            doc = await self.coll.find_one({"address": address, "nonce": nonce})
+            if doc:
+                await self.coll.delete_one({"_id": doc.get("_id")})
         if not doc:
             return None
-        # Verify not expired (TTL index runs ~once a min so we check again)
+        # Verify not expired (TTL sweeper runs ~once/min so we re-check here).
         exp = doc.get("expires_at")
         if isinstance(exp, datetime):
             if exp.tzinfo is None:
                 exp = exp.replace(tzinfo=timezone.utc)
             if exp < datetime.now(timezone.utc):
-                await self.coll.delete_one({"_id": doc.get("_id")})
                 return None
-        await self.coll.delete_one({"_id": doc.get("_id")})
         return doc
 
 

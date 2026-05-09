@@ -58,10 +58,13 @@ MIN_ELIM_INTERVAL_SECS = 5
 MAX_ELIM_INTERVAL_SECS = 7 * 24 * 3600
 
 # Caps for entry counts and image payloads. Mongo's BSON document limit is
-# 16 MB; we cap custom rolls comfortably under that.
+# 16 MB; we cap custom rolls comfortably under that with both a per-image
+# cap AND a total-doc cap so a user can't stuff 40 max-size images and blow
+# past 16 MB.
 MAX_WALLET_ENTRIES = 500
-MAX_CUSTOM_ENTRIES = 50
-MAX_IMAGE_DATA_URL_LEN = 350_000  # ~260 KB decoded — plenty for a 512x512 JPEG
+MAX_CUSTOM_ENTRIES = 40
+MAX_IMAGE_DATA_URL_LEN = 350_000   # ~260 KB decoded — plenty for a 512x512 JPEG
+MAX_TOTAL_IMAGE_BYTES = 12_000_000 # leaves ~4 MB headroom under BSON 16 MB
 MAX_NAME_LEN = 60
 
 _DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$")
@@ -228,6 +231,20 @@ def validate_entries(raw_entries: List[dict], entry_type: str) -> List[RollEntry
     if len(cleaned) > cap:
         raise HTTPException(status_code=400, detail=f"too many entries (max {cap} for {entry_type} rolls)")
 
+    # Aggregate-size guard for custom rolls: even 40 max-size images (40 ×
+    # 350 KB ≈ 14 MB) brushes against the 16 MB BSON ceiling. Reject early
+    # so the admin gets a clear 400 instead of a silent Mongo write failure.
+    if entry_type == "custom":
+        total_image_bytes = sum(len(e.image_data_url or "") for e in cleaned)
+        if total_image_bytes > MAX_TOTAL_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "images total too large — combined image data exceeds the "
+                    "per-roll limit. Reduce the number of entries or compress further."
+                ),
+            )
+
     return cleaned
 
 
@@ -387,6 +404,13 @@ async def update_dev_roll(
         cap = MAX_WALLET_ENTRIES if existing_roll.entry_type == "wallet" else MAX_CUSTOM_ENTRIES
         if len(merged) > cap:
             raise HTTPException(status_code=400, detail=f"too many entries (max {cap})")
+        if existing_roll.entry_type == "custom":
+            total_image_bytes = sum(len(e.image_data_url or "") for e in merged)
+            if total_image_bytes > MAX_TOTAL_IMAGE_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="adding these entries would exceed the combined image-size limit",
+                )
         updates["entries"] = [e.model_dump() for e in merged]
 
     if title is not None:
@@ -525,6 +549,7 @@ async def _resolve_single_roll(col, roll_doc: dict) -> None:
         title=roll.title,
         winner_wallet=winner_entry.wallet or _entry_label(winner_entry),
         pot_sol=roll.pot_sol,
+        is_wallet=bool(winner_entry.wallet),
     ))
     asyncio.create_task(announce_buy_cta())
 
@@ -631,6 +656,7 @@ async def _tick_elimination_roll(col, roll_doc: dict) -> None:
                 title=roll.title,
                 winner_wallet=winner_entry.wallet or _entry_label(winner_entry),
                 pot_sol=roll.pot_sol,
+                is_wallet=bool(winner_entry.wallet),
             ))
             asyncio.create_task(announce_buy_cta())
     else:

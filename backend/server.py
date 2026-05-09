@@ -1246,8 +1246,12 @@ async def _run_daily_spin_core() -> dict:
                 p.setdefault("streak_days", 0)
                 p.setdefault("bonus_tickets", 0)
 
-    await _get_col("spin_state").update_one(
-        {"_id": "singleton"},
+    # Atomically claim the spin slot. If another invocation flipped the
+    # singleton to 'spinning' between our initial read at the top of this
+    # function and now, we lose the race and abort — preventing duplicate
+    # winners committed for the same round.
+    claim = await _get_col("spin_state").update_one(
+        {"_id": "singleton", "phase": {"$ne": "spinning"}},
         {"$set": {
             "phase": "spinning",
             "round_number": round_number,
@@ -1259,6 +1263,13 @@ async def _run_daily_spin_core() -> dict:
         }},
         upsert=True,
     )
+    won_claim = (
+        getattr(claim, "matched_count", 0) > 0
+        or getattr(claim, "upserted_id", None) is not None
+    )
+    if not won_claim:
+        logger.info("[spin] lost race to another concurrent trigger; aborting")
+        raise HTTPException(status_code=409, detail="Spin already in progress")
 
     await broadcaster.broadcast({
         "event": "spin_started",
