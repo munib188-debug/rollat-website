@@ -4,9 +4,7 @@ import { Trophy, ExternalLink } from "lucide-react";
 import { useWinners } from "@/lib/api";
 import { useSpinPhase } from "@/lib/SpinPhaseContext";
 import { launchConfetti } from "@/lib/confetti";
-
-const fmtSol = (n) =>
-  `${(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} SOL`;
+import { formatPrize } from "@/lib/formatPrize";
 
 const truncWallet = (w) =>
   w ? `${w.slice(0, 6)}...${w.slice(-4)}` : "—";
@@ -71,14 +69,14 @@ export default function PreviousWinner() {
                     transition={{ delay: 0.3, type: "spring", stiffness: 200 }}
                     className="font-display font-black text-3xl md:text-4xl gold-text tabular-nums"
                   >
-                    {fmtSol(winner?.amount_sol)}
+                    {formatPrize(winner)}
                   </motion.div>
                   <div className="text-[10px] font-mono text-white/40 uppercase tracking-widest mt-1">
                     {winner?.tickets}× tickets
                   </div>
                 </div>
                 <a
-                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`I just won ${fmtSol(winner?.amount_sol)} in @Rollat_online's on-chain roulette 🎰 Round #${winner?.round_number} · $ROLLAT`)}`}
+                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`I just won ${formatPrize(winner)} in @Rollat_online's on-chain roulette 🎰 Round #${winner?.round_number} · $ROLLAT`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="sm:ml-4 inline-flex items-center gap-2 px-4 py-2 rounded-sm border border-white/20 hover:border-white/40 text-white/70 hover:text-white text-xs font-mono uppercase tracking-widest transition-colors"
@@ -101,7 +99,7 @@ export default function PreviousWinner() {
               <span className="text-white/40 text-[11px] uppercase tracking-[0.2em]">Last Winner</span>
               <span className="text-white">{truncWallet(winner?.wallet)}</span>
               <span className="text-white/20">→</span>
-              <span className="text-gold font-bold">{fmtSol(winner?.amount_sol)}</span>
+              <span className="text-gold font-bold">{formatPrize(winner)}</span>
               <span className="text-white/30 hidden sm:inline">·</span>
               <span className="text-white/40 text-xs hidden sm:inline">Round #{winner?.round_number}</span>
               {winner?.payout_tx && (

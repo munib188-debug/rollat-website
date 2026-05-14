@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Skull, Clock, Volume2, VolumeX, Users } from "lucide-react";
+import { Skull, Clock, Volume2, VolumeX, Users, Music } from "lucide-react";
 
 // Crimson dev-roll accent.
 const ACCENT = "#FF3366";
@@ -273,6 +273,20 @@ export default function TournamentWheel({
   });
   const audio = useWheelAudio(audioOn);
 
+  // Background music — starts paused (muted-by-default). User must click to
+  // play; this sidesteps browser autoplay policy cleanly.
+  const musicRef = useRef(null);
+  const [musicOn, setMusicOn] = useState(false);
+  useEffect(() => {
+    const el = musicRef.current;
+    if (!el) return;
+    if (musicOn) {
+      el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+  }, [musicOn]);
+
   const confettiCanvasRef = useRef(null);
 
   const [now, setNow] = useState(Date.now());
@@ -363,6 +377,8 @@ export default function TournamentWheel({
     });
   };
 
+  const toggleMusic = () => setMusicOn((prev) => !prev);
+
   if (N === 0) return null;
 
   const halfA = sliceAngle / 2;
@@ -375,6 +391,11 @@ export default function TournamentWheel({
       className="glass rounded-sm p-4 sm:p-6 md:p-10 relative overflow-hidden"
       data-testid="tournament-wheel"
     >
+      {/* Hidden audio element for background music. src is only set when
+          music_url is present so the browser never tries to load undefined. */}
+      {roll.music_url && (
+        <audio ref={musicRef} src={roll.music_url} loop preload="none" />
+      )}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{ background: `radial-gradient(60% 60% at 50% 50%, ${ACCENT}1A 0%, transparent 70%)` }}
@@ -410,6 +431,21 @@ export default function TournamentWheel({
             >
               {audioOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
+            {roll.music_url && (
+              <button
+                onClick={toggleMusic}
+                className="p-2 rounded-sm border hover:text-white transition-colors"
+                style={{
+                  borderColor: musicOn ? `${ACCENT}55` : "#ffffff20",
+                  backgroundColor: musicOn ? `${ACCENT}22` : "rgba(0,0,0,0.25)",
+                  color: musicOn ? ACCENT : "rgba(255,255,255,0.6)",
+                }}
+                aria-label={musicOn ? "Pause music" : "Play background music"}
+                title={musicOn ? "Pause background music" : "Play background music (muted by default)"}
+              >
+                <Music className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 

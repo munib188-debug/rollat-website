@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   ArrowLeft, Wallet, Calendar, Coins, Trash2, ShieldAlert, ShieldCheck,
-  Pen, Tag, Timer, PlusCircle, Save, X, Image as ImageIcon, User, Skull, Repeat,
+  Pen, Tag, Timer, PlusCircle, Save, X, Image as ImageIcon, User, Skull, Repeat, Music,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -93,6 +93,7 @@ export default function DevAdmin() {
   const [intervalUnit, setIntervalUnit] = useState("minutes");
   const [isTournament, setIsTournament] = useState(false);
   const [minBackers, setMinBackers] = useState("0");
+  const [musicUrl, setMusicUrl] = useState("");
   const [schedMode, setSchedMode] = useState("timer");
   const [timerHours, setTimerHours] = useState("1");
   const [timerMinutes, setTimerMinutes] = useState("0");
@@ -146,8 +147,8 @@ export default function DevAdmin() {
     setTimerHours("1");
     setTimerMinutes("0");
     setScheduledAt("");
-    setIsTournament(false);
     setMinBackers("0");
+    setMusicUrl("");
   };
 
   const handleSubmit = async () => {
@@ -216,6 +217,7 @@ export default function DevAdmin() {
         scheduled_at: iso,
         is_tournament: isTournament,
         min_backers_per_team: minBackersInt,
+        music_url: musicUrl.trim() || undefined,
       });
       toast.success("Dev roll scheduled");
       resetForm();
@@ -354,6 +356,7 @@ export default function DevAdmin() {
               intervalUnit={intervalUnit} setIntervalUnit={setIntervalUnit}
               isTournament={isTournament} setIsTournament={setIsTournament}
               minBackers={minBackers} setMinBackers={setMinBackers}
+              musicUrl={musicUrl} setMusicUrl={setMusicUrl}
               schedMode={schedMode} setSchedMode={setSchedMode}
               timerHours={timerHours} setTimerHours={setTimerHours}
               timerMinutes={timerMinutes} setTimerMinutes={setTimerMinutes}
@@ -401,6 +404,7 @@ function SetupForm({
   intervalUnit, setIntervalUnit,
   isTournament, setIsTournament,
   minBackers, setMinBackers,
+  musicUrl, setMusicUrl,
   schedMode, setSchedMode,
   timerHours, setTimerHours,
   timerMinutes, setTimerMinutes,
@@ -582,6 +586,23 @@ function SetupForm({
             </div>
           )}
         </div>
+
+        {/* Background Music URL — shown for elimination rolls */}
+        {mode === "elimination" && (
+          <div className="lg:col-span-3">
+            <Label icon={<Music className="w-3.5 h-3.5" />} text="Background Music URL (optional)" />
+            <Input
+              value={musicUrl}
+              onChange={(e) => setMusicUrl(e.target.value)}
+              placeholder="https://example.com/track.mp3"
+              className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm placeholder:text-white/25"
+              data-testid="dev-admin-music-url"
+            />
+            <div className="text-[11px] font-mono text-white/35 mt-2">
+              Direct link to an mp3, ogg, or wav file. Plays in a loop for all viewers — muted by default, they can unmute.
+            </div>
+          </div>
+        )}
 
         {/* Schedule */}
         <div className="lg:col-span-3">
@@ -795,6 +816,9 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
   const [editing, setEditing] = useState(false);
   const [addWallets, setAddWallets] = useState("");
   const [editPot, setEditPot] = useState("");
+  const [editIntervalValue, setEditIntervalValue] = useState("");
+  const [editIntervalUnit, setEditIntervalUnit] = useState("seconds");
+  const [editMusicUrl, setEditMusicUrl] = useState("");
   const [saving, setSaving] = useState(false);
 
   if (!roll) return null;
@@ -802,6 +826,8 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
   const cancellable = roll.phase === "scheduled" || roll.phase === "spinning";
   const isWalletRoll = (roll.entry_type || "wallet") === "wallet";
   const isElim = roll.mode === "elimination";
+  // Elimination rolls can have their interval + music changed even mid-spin.
+  const canEdit = editable || (isElim && roll.phase === "spinning");
 
   const entryCount = (roll.entries?.length ?? 0) || (roll.wallets?.length ?? 0);
   const survivorCount = roll.survivors?.length ?? entryCount;
@@ -810,18 +836,40 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
   const handleEdit = () => {
     setEditPot(roll.pot_sol?.toString() || "");
     setAddWallets("");
+    // Initialise interval editor from the current stored value.
+    const secs = roll.elimination_interval_secs;
+    if (secs) {
+      if (secs % 3600 === 0) { setEditIntervalValue(String(secs / 3600)); setEditIntervalUnit("hours"); }
+      else if (secs % 60 === 0) { setEditIntervalValue(String(secs / 60)); setEditIntervalUnit("minutes"); }
+      else { setEditIntervalValue(String(secs)); setEditIntervalUnit("seconds"); }
+    } else {
+      setEditIntervalValue(""); setEditIntervalUnit("seconds");
+    }
+    setEditMusicUrl(roll.music_url || "");
     setEditing(true);
   };
 
   const handleSave = async () => {
     const payload = {};
-    if (isWalletRoll) {
+    if (editable && isWalletRoll) {
       const newWallets = addWallets.split(/[\s,;\n]+/).map((w) => w.trim()).filter(Boolean);
       if (newWallets.length > 0) payload.wallets_to_add = newWallets;
     }
-    const potNum = Number(editPot);
-    if (editPot && Number.isFinite(potNum) && potNum !== roll.pot_sol) payload.pot_sol = potNum;
-    if (!payload.wallets_to_add && payload.pot_sol === undefined) {
+    if (editable) {
+      const potNum = Number(editPot);
+      if (editPot && Number.isFinite(potNum) && potNum !== roll.pot_sol) payload.pot_sol = potNum;
+    }
+    if (isElim && editIntervalValue) {
+      const newSecs = intervalToSeconds(editIntervalValue, editIntervalUnit);
+      if (newSecs >= 5 && newSecs !== roll.elimination_interval_secs) {
+        payload.elimination_interval_secs = newSecs;
+      }
+    }
+    const trimUrl = editMusicUrl.trim();
+    if (trimUrl !== (roll.music_url || "")) {
+      payload.music_url = trimUrl;
+    }
+    if (Object.keys(payload).length === 0) {
       setEditing(false); return;
     }
     setSaving(true);
@@ -848,14 +896,15 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
           Active Roll · {roll.phase} · {isWalletRoll ? "wallet" : "custom"}{isElim ? " · elimination" : ""}{roll.title ? ` · ${roll.title}` : ""}
         </div>
         <div className="flex items-center gap-2">
-          {editable && !editing && isWalletRoll && (
+          {canEdit && !editing && (
             <Button
               onClick={handleEdit}
               variant="outline"
               className="border-white/15 hover:border-white/30 text-white h-8 px-3 font-mono text-[11px] uppercase tracking-widest rounded-sm"
               data-testid="dev-admin-edit"
             >
-              <PlusCircle className="w-3 h-3 mr-1.5" /> Edit
+              <PlusCircle className="w-3 h-3 mr-1.5" />
+              {editable ? "Edit" : "Edit Interval / Music"}
             </Button>
           )}
           {cancellable && (
@@ -888,39 +937,91 @@ function CurrentRoll({ roll, onCancel, onRefresh }) {
       {editing && (
         <div className="border-t border-white/5 px-6 py-6" data-testid="dev-admin-edit-panel">
           <div className="text-[10px] uppercase tracking-[0.3em] font-mono mb-4" style={{ color: ACCENT }}>
-            Edit Scheduled Roll
+            {editable ? "Edit Scheduled Roll" : "Edit Active Roll"}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2">
-              <Label icon={<PlusCircle className="w-3.5 h-3.5" />} text="Add Wallets (appended to pool)" />
-              <textarea
-                value={addWallets}
-                onChange={(e) => setAddWallets(e.target.value)}
-                rows={4}
-                placeholder={"Paste new wallet addresses to add\n(existing wallets are kept)"}
-                className="w-full bg-obsidian-950/80 border border-white/10 text-white placeholder:text-white/25 font-mono text-sm rounded-sm p-3 focus:outline-none focus:border-white/30"
-                data-testid="dev-admin-add-wallets"
-              />
-              {newWalletsPreview.length > 0 && (
-                <div className="mt-1.5 flex items-center gap-3 text-[11px] font-mono uppercase tracking-widest text-white/45">
-                  <span style={{ color: validNew ? ACCENT : undefined }}>+{validNew} valid</span>
-                  {invalidNew > 0 && <span className="text-crimson">· {invalidNew} invalid</span>}
-                  <span className="text-white/30">· new total: {entryCount + validNew}</span>
+            {/* Add wallets — only when scheduled wallet roll */}
+            {editable && isWalletRoll && (
+              <div className="lg:col-span-2">
+                <Label icon={<PlusCircle className="w-3.5 h-3.5" />} text="Add Wallets (appended to pool)" />
+                <textarea
+                  value={addWallets}
+                  onChange={(e) => setAddWallets(e.target.value)}
+                  rows={4}
+                  placeholder={"Paste new wallet addresses to add\n(existing wallets are kept)"}
+                  className="w-full bg-obsidian-950/80 border border-white/10 text-white placeholder:text-white/25 font-mono text-sm rounded-sm p-3 focus:outline-none focus:border-white/30"
+                  data-testid="dev-admin-add-wallets"
+                />
+                {newWalletsPreview.length > 0 && (
+                  <div className="mt-1.5 flex items-center gap-3 text-[11px] font-mono uppercase tracking-widest text-white/45">
+                    <span style={{ color: validNew ? ACCENT : undefined }}>+{validNew} valid</span>
+                    {invalidNew > 0 && <span className="text-crimson">· {invalidNew} invalid</span>}
+                    <span className="text-white/30">· new total: {entryCount + validNew}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Pot — only when scheduled */}
+            {editable && (
+              <div>
+                <Label icon={<Coins className="w-3.5 h-3.5" />} text="Update Pot (SOL)" />
+                <Input
+                  value={editPot}
+                  onChange={(e) => setEditPot(e.target.value)}
+                  type="number" min="0" step="0.01"
+                  className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm"
+                  data-testid="dev-admin-edit-pot"
+                />
+                <div className="text-[11px] font-mono text-white/35 mt-2">Leave unchanged to keep current.</div>
+              </div>
+            )}
+
+            {/* Elimination interval — available any time for elimination rolls */}
+            {isElim && (
+              <div className="lg:col-span-2">
+                <Label icon={<Timer className="w-3.5 h-3.5" />} text="Elimination Interval" />
+                <div className="flex gap-3">
+                  <Input
+                    value={editIntervalValue}
+                    onChange={(e) => setEditIntervalValue(e.target.value.replace(/\D/g, ""))}
+                    type="number" min="1"
+                    placeholder={roll.elimination_interval_secs?.toString() || ""}
+                    className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm flex-1"
+                    data-testid="dev-admin-edit-interval"
+                  />
+                  <select
+                    value={editIntervalUnit}
+                    onChange={(e) => setEditIntervalUnit(e.target.value)}
+                    className="bg-obsidian-950/80 border border-white/10 text-white font-mono h-11 rounded-sm px-3 focus:outline-none focus:border-white/30"
+                  >
+                    <option value="seconds">seconds</option>
+                    <option value="minutes">minutes</option>
+                    <option value="hours">hours</option>
+                  </select>
                 </div>
-              )}
-            </div>
-            <div>
-              <Label icon={<Coins className="w-3.5 h-3.5" />} text="Update Pot (SOL)" />
+                <div className="text-[11px] font-mono text-white/35 mt-2">
+                  {roll.phase === "spinning"
+                    ? "Takes effect immediately — next elimination resets from now."
+                    : "Leave blank to keep current interval."}
+                </div>
+              </div>
+            )}
+
+            {/* Music URL — available any time */}
+            <div className={isElim ? "" : "lg:col-span-3"}>
+              <Label icon={<Music className="w-3.5 h-3.5" />} text="Background Music URL" />
               <Input
-                value={editPot}
-                onChange={(e) => setEditPot(e.target.value)}
-                type="number" min="0" step="0.01"
-                className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm"
-                data-testid="dev-admin-edit-pot"
+                value={editMusicUrl}
+                onChange={(e) => setEditMusicUrl(e.target.value)}
+                placeholder="https://example.com/track.mp3 (empty to clear)"
+                className="bg-obsidian-950/80 border-white/10 text-white font-mono h-11 rounded-sm placeholder:text-white/25"
+                data-testid="dev-admin-edit-music-url"
               />
-              <div className="text-[11px] font-mono text-white/35 mt-2">Leave unchanged to keep current.</div>
+              <div className="text-[11px] font-mono text-white/35 mt-2">mp3 / ogg / wav. Empty = no music.</div>
             </div>
           </div>
+
           <div className="mt-4 flex items-center justify-end gap-3">
             <Button
               onClick={() => setEditing(false)}

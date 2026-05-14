@@ -135,6 +135,9 @@ class DevRoll(BaseModel):
     # this many supporters, even if scheduled_at has passed. 0 = no gate.
     # Only meaningful when is_tournament=True.
     min_backers_per_team: int = 0
+    # Optional background music URL played for all viewers during the wheel.
+    # Admin supplies a direct link (mp3/ogg/wav). Empty string treated as None.
+    music_url: Optional[str] = None
 
     entries: List[RollEntry] = Field(default_factory=list)
     survivors: List[str] = Field(default_factory=list)        # entry IDs still in
@@ -370,6 +373,19 @@ async def has_active_roll(col) -> bool:
     return bool(doc)
 
 
+def _validate_music_url(url: Optional[str]) -> Optional[str]:
+    """Normalize and validate a music URL. Returns None for empty/None input.
+    Raises HTTPException(400) if the URL looks malformed."""
+    if not url:
+        return None
+    url = str(url).strip()[:500]
+    if not url:
+        return None
+    if not (url.startswith("https://") or url.startswith("http://")):
+        raise HTTPException(status_code=400, detail="music_url must start with https:// or http://")
+    return url
+
+
 async def create_dev_roll(
     col,
     *,
@@ -383,6 +399,7 @@ async def create_dev_roll(
     created_by: str,
     is_tournament: bool = False,
     min_backers_per_team: int = 0,
+    music_url: Optional[str] = None,
 ) -> dict:
     if entry_type not in ("wallet", "custom"):
         raise HTTPException(status_code=400, detail="entry_type must be 'wallet' or 'custom'")
@@ -448,6 +465,8 @@ async def create_dev_roll(
     if await has_active_roll(col):
         raise HTTPException(status_code=400, detail="another dev roll is already active — cancel it first")
 
+    validated_music_url = _validate_music_url(music_url)
+
     roll = DevRoll(
         title=title,
         entry_type=entry_type,
@@ -455,6 +474,7 @@ async def create_dev_roll(
         elimination_interval_secs=elimination_interval_secs,
         is_tournament=bool(is_tournament),
         min_backers_per_team=min_backers_per_team,
+        music_url=validated_music_url,
         entries=cleaned_entries,
         pot_sol=pot_value,
         scheduled_at=sched,
@@ -488,14 +508,31 @@ async def update_dev_roll(
     title: Optional[str] = None,
     pot_sol: Optional[float] = None,
     scheduled_at: Optional[datetime] = None,
+    elimination_interval_secs: Optional[int] = None,
+    music_url: Optional[str] = None,
 ) -> dict:
-    """Edit a still-scheduled roll. Entries are appended (deduped on wallet
-    for wallet rolls)."""
+    """Edit a roll.
+
+    While **scheduled**: all fields can change.
+    While **spinning** (elimination only): only ``elimination_interval_secs``
+    and ``music_url`` are accepted.  Updating the interval also resets
+    ``next_elimination_at`` to now + new_interval so the countdown is
+    immediately visible on the public wheel.
+    """
     doc = await col.find_one({"id": roll_id})
     if not doc:
         raise HTTPException(status_code=404, detail="roll not found")
-    if doc.get("phase") != "scheduled":
-        raise HTTPException(status_code=400, detail=f"cannot edit a roll in phase '{doc.get('phase')}'")
+
+    phase = doc.get("phase")
+    if phase not in ("scheduled", "spinning"):
+        raise HTTPException(status_code=400, detail=f"cannot edit a roll in phase '{phase}'")
+
+    if phase == "spinning":
+        if entries_to_add or title is not None or pot_sol is not None or scheduled_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="only the elimination interval and music URL can be changed while a roll is spinning",
+            )
 
     existing_roll = DevRoll.model_validate(doc)
     updates: dict = {}
@@ -541,6 +578,19 @@ async def update_dev_roll(
             raise HTTPException(status_code=400, detail="scheduled_at must be at least 5 seconds in the future")
         updates["scheduled_at"] = sched
         updates["ten_min_warned"] = False
+
+    if elimination_interval_secs is not None:
+        if existing_roll.mode != "elimination":
+            raise HTTPException(status_code=400, detail="elimination_interval_secs only applies to elimination rolls")
+        validated_secs = _validate_interval(elimination_interval_secs)
+        updates["elimination_interval_secs"] = validated_secs
+        if phase == "spinning":
+            # Reschedule the next tick from right now so the new countdown is
+            # immediately correct on the public wheel.
+            updates["next_elimination_at"] = datetime.now(timezone.utc) + timedelta(seconds=validated_secs)
+
+    if music_url is not None:
+        updates["music_url"] = _validate_music_url(music_url)  # None clears it
 
     if not updates:
         return _normalize_doc(doc)

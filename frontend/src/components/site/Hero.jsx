@@ -4,11 +4,13 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSpinPhase } from "@/lib/SpinPhaseContext";
 import { useCountdown, pad } from "@/lib/useCountdown";
+import { formatPrize, PRIZE_UNIT_LABEL } from "@/lib/formatPrize";
 
 export default function Hero() {
   const { stats, spinState } = useSpinPhase() || {};
   const t = useCountdown(stats?.next_spin_at);
   const phase = spinState?.phase || "idle";
+  const currency = stats?.prize_currency || "SOL";
 
   return (
     <section className="relative pt-32 pb-20 md:pt-40 md:pb-28 overflow-hidden grain felt-bg" data-testid="hero-section">
@@ -75,8 +77,8 @@ export default function Hero() {
           >
             Hold ≥ 1,000,000 $ROLLAT for 24 continuous hours. Every snapshot you survive
             keeps you in the wheel. Every 24 hours, Switchboard VRF picks one wallet —
-            the entire pot drops straight into their connected wallet as SOL. No team
-            votes. No bias. Just code.
+            the prize drops straight into their connected wallet
+            {currency === "ROLLAT" ? " as $ROLLAT" : " as SOL"}. No team votes. No bias. Just code.
           </motion.p>
 
           {/* Countdown / Spin Status */}
@@ -100,7 +102,7 @@ export default function Hero() {
               <div className="flex flex-col gap-1">
                 <div className="text-[10px] tracking-[0.25em] text-white/40 uppercase">Winner</div>
                 <div className="text-2xl sm:text-3xl font-black gold-text truncate max-w-xs">{spinState?.winner?.wallet || "—"}</div>
-                <div className="text-lg font-bold text-gold">{spinState?.winner?.amount_sol ? `${spinState.winner.amount_sol} SOL` : ""}</div>
+                <div className="text-lg font-bold text-gold">{spinState?.winner ? formatPrize(spinState.winner) : ""}</div>
               </div>
             ) : (
               <div className="flex items-end gap-3">

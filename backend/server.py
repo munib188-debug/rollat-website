@@ -231,6 +231,10 @@ class Winner(BaseModel):
     round_number: int
     wallet: str
     amount_sol: float
+    # Unit + token amount for rounds paid in $ROLLAT. Defaults preserve
+    # backwards-compat: old winners have no `currency` field → treated as SOL.
+    currency: str = "SOL"
+    amount_rollat: Optional[float] = None
     tickets: int
     participants_count: int = 0
     won_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -256,6 +260,13 @@ class Stats(BaseModel):
     rollover_count: int
     pot_threshold_sol: float
     fixed_prize_sol: Optional[float] = None
+    # Currency toggle — "SOL" (default) or "ROLLAT". When "ROLLAT", the prize
+    # callout + winner amount are displayed in $ROLLAT and gated by the pot
+    # wallet's token balance instead of its SOL balance.
+    prize_currency: str = "SOL"
+    fixed_prize_rollat: Optional[float] = None
+    pot_threshold_rollat: float = 0
+    pot_rollat: float = 0
     token_price_usd: float
     market_cap_usd: float
     holders: int
@@ -440,6 +451,13 @@ def _runtime_defaults() -> dict:
     return {
         "fixed_daily_prize_sol": float(FIXED_DAILY_PRIZE_SOL) if FIXED_DAILY_PRIZE_SOL is not None else None,
         "pot_threshold_sol": float(POT_THRESHOLD_SOL),
+        # Daily reward currency toggle. "SOL" = legacy behaviour. "ROLLAT" =
+        # admin pays winners in $ROLLAT tokens (also manual). The token prize
+        # amount + token-pot gate live alongside the SOL ones; only the active
+        # currency's pair is consulted at spin time.
+        "prize_currency": "SOL",
+        "fixed_daily_prize_rollat": None,
+        "pot_threshold_rollat": 100_000.0,
         "min_qualifying_tokens": int(MIN_QUALIFYING_TOKENS),
         "excluded_wallets": sorted(EXCLUDED_WALLETS),
         # Long-term holder bonus
@@ -486,6 +504,13 @@ async def get_runtime_config(force_refresh: bool = False) -> dict:
             cfg["fixed_daily_prize_sol"] = float(v) if v is not None else None
         if "pot_threshold_sol" in doc and doc["pot_threshold_sol"] is not None:
             cfg["pot_threshold_sol"] = float(doc["pot_threshold_sol"])
+        if "prize_currency" in doc and doc["prize_currency"] in ("SOL", "ROLLAT"):
+            cfg["prize_currency"] = doc["prize_currency"]
+        if "fixed_daily_prize_rollat" in doc:
+            v = doc["fixed_daily_prize_rollat"]
+            cfg["fixed_daily_prize_rollat"] = float(v) if v is not None else None
+        if "pot_threshold_rollat" in doc and doc["pot_threshold_rollat"] is not None:
+            cfg["pot_threshold_rollat"] = float(doc["pot_threshold_rollat"])
         if "min_qualifying_tokens" in doc and doc["min_qualifying_tokens"] is not None:
             cfg["min_qualifying_tokens"] = int(doc["min_qualifying_tokens"])
         if "excluded_wallets" in doc and isinstance(doc["excluded_wallets"], list):
@@ -546,9 +571,14 @@ async def daily_reminder_loop() -> None:
             if 570 <= seconds_left <= 630 and warned_for != next_spin:
                 pot = await fetch_pot_balance()
                 pot_sol = round(float(pot or 0), 4)
+                cfg = await get_runtime_config()
+                currency = cfg.get("prize_currency", "SOL")
+                amount_rollat = cfg.get("fixed_daily_prize_rollat") if currency == "ROLLAT" else None
                 asyncio.create_task(announce_daily_spin_reminder(
                     pot_sol=pot_sol,
                     next_spin_at_iso=next_spin.isoformat(),
+                    currency=currency,
+                    amount_rollat=amount_rollat,
                 ))
                 warned_for = next_spin
                 logger.info(f"[daily_reminder] 10-min warning sent for {next_spin.isoformat()}")
@@ -802,11 +832,13 @@ async def get_stats():
     # are cached or indexed so /stats stays fast under polling.
     cfg = await get_runtime_config()
     excl = frozenset(cfg.get("excluded_wallets") or [])
-    market, holders, recent_snaps, pot_sol = await asyncio.gather(
+    from onchain import POT_WALLET as _POT_WALLET  # avoids top-level circular
+    market, holders, recent_snaps, pot_sol, pot_rollat = await asyncio.gather(
         fetch_token_market_data(),
         fetch_holders_count(),
         fetch_recent_snapshots(_get_col("holder_snapshots")),
         fetch_pot_balance(),
+        fetch_wallet_balance(_POT_WALLET) if _POT_WALLET else asyncio.sleep(0, result=0.0),
     )
 
     # Strict qualification: only count wallets when ≥24 snapshots exist.
@@ -830,6 +862,10 @@ async def get_stats():
         rollover_count=rollover_count,
         pot_threshold_sol=float(cfg.get("pot_threshold_sol", POT_THRESHOLD_SOL)),
         fixed_prize_sol=cfg.get("fixed_daily_prize_sol"),
+        prize_currency=cfg.get("prize_currency", "SOL"),
+        fixed_prize_rollat=cfg.get("fixed_daily_prize_rollat"),
+        pot_threshold_rollat=float(cfg.get("pot_threshold_rollat") or 0),
+        pot_rollat=round(float(pot_rollat or 0), 2),
         token_price_usd=float(market.get("price_usd") or 0),
         market_cap_usd=float(market.get("market_cap_usd") or 0),
         holders=int(holders or 0),
@@ -971,6 +1007,56 @@ async def admin_patch_config(payload: dict, admin: str = Depends(get_admin_walle
             update["pot_threshold_sol"] = f
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="pot_threshold_sol must be a non-negative number")
+
+    # ---- Daily prize currency toggle (SOL / ROLLAT) ----
+    if "prize_currency" in payload:
+        v = payload["prize_currency"]
+        if v not in ("SOL", "ROLLAT"):
+            raise HTTPException(status_code=400, detail="prize_currency must be 'SOL' or 'ROLLAT'")
+        update["prize_currency"] = v
+
+    if "fixed_daily_prize_rollat" in payload:
+        v = payload["fixed_daily_prize_rollat"]
+        if v is None or v == "":
+            update["fixed_daily_prize_rollat"] = None
+        else:
+            try:
+                f = float(v)
+                if f < 0:
+                    raise ValueError
+                update["fixed_daily_prize_rollat"] = f
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="fixed_daily_prize_rollat must be a non-negative number or null")
+
+    if "pot_threshold_rollat" in payload:
+        try:
+            f = float(payload["pot_threshold_rollat"])
+            if f < 0:
+                raise ValueError
+            update["pot_threshold_rollat"] = f
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="pot_threshold_rollat must be a non-negative number")
+
+    # Enforce: when currency=ROLLAT, a positive token prize must be set so the
+    # spin can't fire with an undefined payout amount. Use the post-merge view
+    # (incoming patch + existing config) for the check.
+    if update.get("prize_currency") == "ROLLAT" or (
+        "prize_currency" not in update and "fixed_daily_prize_rollat" in update
+    ):
+        # Need the resulting prize_currency value, falling back to the current
+        # one in DB if not being changed here.
+        existing_cfg = await get_runtime_config()
+        final_currency = update.get("prize_currency", existing_cfg.get("prize_currency", "SOL"))
+        if final_currency == "ROLLAT":
+            final_prize = update.get(
+                "fixed_daily_prize_rollat",
+                existing_cfg.get("fixed_daily_prize_rollat"),
+            )
+            if not final_prize or float(final_prize) <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="fixed_daily_prize_rollat must be a positive number when prize_currency is ROLLAT",
+                )
 
     if "min_qualifying_tokens" in payload:
         try:
@@ -1316,34 +1402,71 @@ async def _run_daily_spin_core() -> dict:
     if doc and doc.get("phase") == "spinning":
         raise HTTPException(status_code=409, detail="Spin already in progress")
 
-    # Rollover check: if pot hasn't hit the threshold, skip the spin and announce.
-    # In fixed-prize mode this gate is bypassed entirely — the spin always runs
-    # and the winner gets fixed_daily_prize_sol regardless of pot balance.
+    # Rollover check: if the pot hasn't hit the threshold, skip the spin and
+    # announce. Currency mode picks which pot/threshold pair applies:
+    #   SOL    → pot wallet SOL balance vs fixed_daily_prize_sol / pot_threshold_sol
+    #   ROLLAT → pot wallet $ROLLAT balance vs pot_threshold_rollat
     cfg = await get_runtime_config()
+    currency = cfg.get("prize_currency", "SOL")
     fixed_prize = cfg.get("fixed_daily_prize_sol")
     pot_threshold = float(cfg.get("pot_threshold_sol", POT_THRESHOLD_SOL))
     pot_check = await fetch_pot_balance()
     pot_check_sol = round(float(pot_check or 0), 4)
-    prize_required = float(fixed_prize) if fixed_prize is not None else pot_threshold
-    if pot_check_sol < prize_required:
-        rollover_count = (doc.get("rollover_count", 0) + 1) if doc else 1
-        await _get_col("spin_state").update_one(
-            {"_id": "singleton"},
-            {"$set": {"rollover_count": rollover_count, "phase": "awaiting_funds"}},
-            upsert=True,
+
+    if currency == "ROLLAT":
+        from onchain import POT_WALLET as _POT_WALLET
+        prize_required_rollat = float(cfg.get("fixed_daily_prize_rollat") or 0)
+        threshold_rollat = float(cfg.get("pot_threshold_rollat") or 0)
+        pot_rollat_check = (
+            await fetch_wallet_balance(_POT_WALLET) if _POT_WALLET else 0.0
         )
-        asyncio.create_task(announce_rollover(
-            pot_sol=pot_check_sol,
-            threshold_sol=prize_required,
-            rollover_count=rollover_count,
-        ))
-        logger.info(f"[spin] rollover #{rollover_count} — pot {pot_check_sol} SOL < required {prize_required} SOL")
-        return {
-            "status": "rollover",
-            "pot_sol": pot_check_sol,
-            "threshold_sol": prize_required,
-            "rollover_count": rollover_count,
-        }
+        pot_rollat_check = round(float(pot_rollat_check or 0), 2)
+        if pot_rollat_check < threshold_rollat:
+            rollover_count = (doc.get("rollover_count", 0) + 1) if doc else 1
+            await _get_col("spin_state").update_one(
+                {"_id": "singleton"},
+                {"$set": {"rollover_count": rollover_count, "phase": "awaiting_funds"}},
+                upsert=True,
+            )
+            asyncio.create_task(announce_rollover(
+                pot_sol=pot_check_sol,
+                threshold_sol=prize_required_rollat,
+                rollover_count=rollover_count,
+                currency="ROLLAT",
+                pot_amount=pot_rollat_check,
+                threshold_amount=threshold_rollat,
+            ))
+            logger.info(
+                f"[spin] rollover #{rollover_count} — pot {pot_rollat_check} $ROLLAT < threshold {threshold_rollat}"
+            )
+            return {
+                "status": "rollover",
+                "currency": "ROLLAT",
+                "pot_rollat": pot_rollat_check,
+                "threshold_rollat": threshold_rollat,
+                "rollover_count": rollover_count,
+            }
+    else:
+        prize_required = float(fixed_prize) if fixed_prize is not None else pot_threshold
+        if pot_check_sol < prize_required:
+            rollover_count = (doc.get("rollover_count", 0) + 1) if doc else 1
+            await _get_col("spin_state").update_one(
+                {"_id": "singleton"},
+                {"$set": {"rollover_count": rollover_count, "phase": "awaiting_funds"}},
+                upsert=True,
+            )
+            asyncio.create_task(announce_rollover(
+                pot_sol=pot_check_sol,
+                threshold_sol=prize_required,
+                rollover_count=rollover_count,
+            ))
+            logger.info(f"[spin] rollover #{rollover_count} — pot {pot_check_sol} SOL < required {prize_required} SOL")
+            return {
+                "status": "rollover",
+                "pot_sol": pot_check_sol,
+                "threshold_sol": prize_required,
+                "rollover_count": rollover_count,
+            }
 
     recent_snaps = await fetch_recent_snapshots(_get_col("holder_snapshots"))
     excl = frozenset(cfg.get("excluded_wallets") or [])
@@ -1416,16 +1539,26 @@ async def _run_daily_spin_core() -> dict:
     })
 
     pot_sol_now = await fetch_pot_balance()
-    announced_prize = (
-        float(fixed_prize)
-        if fixed_prize is not None
-        else round(float(pot_sol_now or 0), 4)
-    )
-    asyncio.create_task(announce_daily_spin_started(
-        round_number=round_number,
-        participants_count=len(participants),
-        pot_sol=announced_prize,
-    ))
+    if currency == "ROLLAT":
+        announced_prize_rollat = float(cfg.get("fixed_daily_prize_rollat") or 0)
+        asyncio.create_task(announce_daily_spin_started(
+            round_number=round_number,
+            participants_count=len(participants),
+            pot_sol=round(float(pot_sol_now or 0), 4),
+            currency="ROLLAT",
+            amount_rollat=announced_prize_rollat,
+        ))
+    else:
+        announced_prize = (
+            float(fixed_prize)
+            if fixed_prize is not None
+            else round(float(pot_sol_now or 0), 4)
+        )
+        asyncio.create_task(announce_daily_spin_started(
+            round_number=round_number,
+            participants_count=len(participants),
+            pot_sol=announced_prize,
+        ))
 
     # Resolve after animation time (10s)
     asyncio.create_task(_resolve_after_delay(participants, round_number, 10))
@@ -1475,11 +1608,18 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
     winner_entry = select_weighted_winner(participants)
     pot_sol = await fetch_pot_balance()
     cfg = await get_runtime_config()
+    currency = cfg.get("prize_currency", "SOL")
     fixed_prize = cfg.get("fixed_daily_prize_sol")
-    if fixed_prize is not None:
-        amount_sol = float(fixed_prize)
+
+    if currency == "ROLLAT":
+        amount_rollat: Optional[float] = float(cfg.get("fixed_daily_prize_rollat") or 0)
+        amount_sol = 0.0
     else:
-        amount_sol = round(float(pot_sol or 0), 4)
+        amount_rollat = None
+        if fixed_prize is not None:
+            amount_sol = float(fixed_prize)
+        else:
+            amount_sol = round(float(pot_sol or 0), 4)
     now = datetime.now(timezone.utc)
 
     winner_data = {
@@ -1489,6 +1629,8 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
         "bonus_tickets": int(winner_entry.get("bonus_tickets") or 0),
         "streak_days": int(winner_entry.get("streak_days") or 0),
         "amount_sol": amount_sol,
+        "currency": currency,
+        "amount_rollat": amount_rollat,
         "round_number": round_number,
     }
 
@@ -1498,6 +1640,8 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
         "round_number": round_number,
         "wallet": winner_entry["wallet"],
         "amount_sol": amount_sol,
+        "currency": currency,
+        "amount_rollat": amount_rollat,
         "tickets": winner_entry["tickets"],
         "base_tickets": winner_data["base_tickets"],
         "bonus_tickets": winner_data["bonus_tickets"],
@@ -1527,6 +1671,8 @@ async def _resolve_after_delay(participants: List[dict], round_number: int, dela
         winner_wallet=winner_entry["wallet"],
         amount_sol=amount_sol,
         participants_count=len(participants),
+        currency=currency,
+        amount_rollat=amount_rollat,
     ))
     asyncio.create_task(announce_buy_cta())
 
@@ -1642,6 +1788,9 @@ class DevRollCreateRequest(BaseModel):
     # Tournament gate — minimum backers per team required to start the wheel.
     # 0 disables the gate; max 50.
     min_backers_per_team: int = 0
+    # Optional background music URL (mp3/ogg/wav) played for all viewers
+    # during the wheel. Empty string clears it.
+    music_url: Optional[str] = None
 
 
 class DevRollUpdateRequest(BaseModel):
@@ -1651,6 +1800,10 @@ class DevRollUpdateRequest(BaseModel):
     title: Optional[str] = None
     pot_sol: Optional[float] = None
     scheduled_at: Optional[str] = None
+    # Can be changed while spinning (elimination rolls only).
+    elimination_interval_secs: Optional[int] = None
+    # Can be changed while spinning. Empty string clears existing music.
+    music_url: Optional[str] = None
 
 
 def _parse_scheduled_at(raw: str) -> datetime:
@@ -1694,6 +1847,7 @@ async def dev_roll_create(req: DevRollCreateRequest, admin: str = Depends(get_ad
         created_by=admin,
         is_tournament=req.is_tournament,
         min_backers_per_team=req.min_backers_per_team,
+        music_url=req.music_url,
     )
 
 
@@ -1731,6 +1885,8 @@ async def dev_roll_update(roll_id: str, req: DevRollUpdateRequest, admin: str = 
         title=req.title,
         pot_sol=req.pot_sol,
         scheduled_at=sched,
+        elimination_interval_secs=req.elimination_interval_secs,
+        music_url=req.music_url,
     )
 
 

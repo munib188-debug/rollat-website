@@ -12,6 +12,7 @@ import {
   CheckCircle2, AlertCircle, Zap, ExternalLink, Coins
 } from "lucide-react";
 import { toast } from "sonner";
+import { formatPrize } from "@/lib/formatPrize";
 
 const DEFAULT_WALLET = "";
 const fmtSol = (n) =>
@@ -335,14 +336,14 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-obsidian-900/40 border border-white/5 rounded-sm p-6" data-testid="dashboard-payouts-card">
-            <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold mb-4">Past SOL Payouts</div>
+            <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-gold mb-4">Past Payouts</div>
             {data?.win_history?.length ? (
               <div className="space-y-3">
                 {data.win_history.map((w) => (
                   <div key={w.id} className="border border-gold/20 bg-gold/5 p-4 rounded-sm">
                     <div className="font-display font-bold text-base text-gold">Round #{w.round_number}</div>
                     <div className="font-mono text-xs text-white/60 mt-1">
-                      {fmtSol(w.amount_sol)} · {new Date(w.won_at).toLocaleDateString()}
+                      {formatPrize(w)} · {new Date(w.won_at).toLocaleDateString()}
                     </div>
                   </div>
                 ))}

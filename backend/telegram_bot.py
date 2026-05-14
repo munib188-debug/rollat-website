@@ -135,20 +135,20 @@ EVENT_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "daily_spin_reminder": {
         "label": "Daily Spin 10-min reminder",
-        "vars": ["pot_sol", "time_str", "site"],
+        "vars": ["pot_sol", "prize_label", "time_str", "site"],
         "template": (
             "⏰ *Daily Spin — 10 minutes to go\\!*\n"
-            "💰 Current pot: `{pot_sol} SOL`\n"
+            "💰 Prize: `{prize_label}`\n"
             "🕐 Spins at: `{time_str}`\n\n"
             "Watch live → {site}/#roulette-arena"
         ),
     },
     "rollover": {
         "label": "Pot rollover",
-        "vars": ["pot_sol", "threshold_sol", "rollover_count", "site"],
+        "vars": ["pot_sol", "threshold_sol", "prize_label", "threshold_label", "rollover_count", "site"],
         "template": (
             "🔄 *Pot Rolled Over — Round Skipped*\n"
-            "💰 Current pot: `{pot_sol} SOL` \\(threshold: `{threshold_sol} SOL`\\)\n"
+            "💰 Current pot: `{prize_label}` \\(threshold: `{threshold_label}`\\)\n"
             "📈 Pot carries forward to the next round\n"
             "🔢 Rollover streak: {rollover_count}\n\n"
             "{site}"
@@ -156,21 +156,21 @@ EVENT_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "daily_spin_started": {
         "label": "Daily Spin started",
-        "vars": ["round_number", "participants_count", "pot_sol", "site"],
+        "vars": ["round_number", "participants_count", "pot_sol", "prize_label", "site"],
         "template": (
             "🎰 *Daily Spin — Round \\#{round_number}*\n"
-            "💰 Pot: `{pot_sol} SOL`\n"
+            "💰 Prize: `{prize_label}`\n"
             "👥 {participants_count} wallets competing\n\n"
             "Watch live → {site}/#roulette-arena"
         ),
     },
     "daily_spin_winner": {
         "label": "Daily Spin winner",
-        "vars": ["round_number", "winner_wallet", "amount_sol", "participants_count", "explorer_url", "site"],
+        "vars": ["round_number", "winner_wallet", "amount_sol", "prize_label", "participants_count", "explorer_url", "site"],
         "template": (
             "🏆 *Round \\#{round_number} — Winner\\!*\n"
             "🎯 `{winner_wallet}`\n"
-            "💰 `{amount_sol} SOL` · odds 1/{participants_count}\n"
+            "💰 `{prize_label}` · odds 1/{participants_count}\n"
             "[View on Solscan]({explorer_url})\n\n"
             "{site}"
         ),
@@ -431,22 +431,50 @@ async def announce_dev_roll_reminder(
 
 # ── Daily Spin ──────────────────────────────────────────────────────────────
 
+def _format_prize_label(
+    currency: str,
+    amount_sol: float,
+    amount_rollat: Optional[float] = None,
+) -> str:
+    """Pre-formatted "X SOL" or "X $ROLLAT" string used by daily-spin templates."""
+    if currency == "ROLLAT":
+        return f"{float(amount_rollat or 0):,.0f} $ROLLAT"
+    return f"{float(amount_sol or 0)} SOL"
+
+
 async def announce_daily_spin_reminder(
     pot_sol: float,
     next_spin_at_iso: str,
+    currency: str = "SOL",
+    amount_rollat: Optional[float] = None,
 ) -> None:
     time_str = next_spin_at_iso[:16].replace("T", " ") + " UTC" if next_spin_at_iso else "00:00 UTC"
-    await _emit("daily_spin_reminder", pot_sol=pot_sol, time_str=time_str, site=SITE)
+    prize_label = _format_prize_label(currency, pot_sol, amount_rollat)
+    await _emit(
+        "daily_spin_reminder",
+        pot_sol=pot_sol, prize_label=prize_label,
+        time_str=time_str, site=SITE,
+    )
 
 
 async def announce_rollover(
     pot_sol: float,
     threshold_sol: float,
     rollover_count: int,
+    currency: str = "SOL",
+    pot_amount: Optional[float] = None,
+    threshold_amount: Optional[float] = None,
 ) -> None:
+    if currency == "ROLLAT":
+        prize_label = _format_prize_label("ROLLAT", 0, pot_amount)
+        threshold_label = _format_prize_label("ROLLAT", 0, threshold_amount)
+    else:
+        prize_label = _format_prize_label("SOL", pot_sol)
+        threshold_label = _format_prize_label("SOL", threshold_sol)
     await _emit(
         "rollover",
         pot_sol=pot_sol, threshold_sol=threshold_sol,
+        prize_label=prize_label, threshold_label=threshold_label,
         rollover_count=rollover_count, site=SITE,
     )
 
@@ -455,11 +483,14 @@ async def announce_daily_spin_started(
     round_number: int,
     participants_count: int,
     pot_sol: float,
+    currency: str = "SOL",
+    amount_rollat: Optional[float] = None,
 ) -> None:
+    prize_label = _format_prize_label(currency, pot_sol, amount_rollat)
     await _emit(
         "daily_spin_started",
         round_number=round_number, participants_count=participants_count,
-        pot_sol=pot_sol, site=SITE,
+        pot_sol=pot_sol, prize_label=prize_label, site=SITE,
     )
 
 
@@ -468,11 +499,15 @@ async def announce_daily_spin_winner(
     winner_wallet: str,
     amount_sol: float,
     participants_count: int,
+    currency: str = "SOL",
+    amount_rollat: Optional[float] = None,
 ) -> None:
+    prize_label = _format_prize_label(currency, amount_sol, amount_rollat)
     await _emit(
         "daily_spin_winner",
         round_number=round_number, winner_wallet=winner_wallet,
-        amount_sol=amount_sol, participants_count=participants_count,
+        amount_sol=amount_sol, prize_label=prize_label,
+        participants_count=participants_count,
         explorer_url=f"https://solscan.io/account/{winner_wallet}", site=SITE,
     )
 

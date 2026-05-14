@@ -233,8 +233,11 @@ function ConfigSection() {
       setCfg(r.data.current);
       setDefaults(r.data.defaults);
       setDraft({
+        prize_currency: r.data.current.prize_currency ?? "SOL",
         fixed_daily_prize_sol: r.data.current.fixed_daily_prize_sol ?? "",
         pot_threshold_sol: r.data.current.pot_threshold_sol ?? "",
+        fixed_daily_prize_rollat: r.data.current.fixed_daily_prize_rollat ?? "",
+        pot_threshold_rollat: r.data.current.pot_threshold_rollat ?? "",
         min_qualifying_tokens: r.data.current.min_qualifying_tokens ?? "",
         streak_bonus_enabled: r.data.current.streak_bonus_enabled ?? true,
         streak_week_threshold: r.data.current.streak_week_threshold ?? 7,
@@ -257,6 +260,7 @@ function ConfigSection() {
     setSaving(true);
     try {
       const payload = {};
+      payload.prize_currency = draft.prize_currency === "ROLLAT" ? "ROLLAT" : "SOL";
       const fp = draft.fixed_daily_prize_sol;
       if (fp === "" || fp === null) {
         payload.fixed_daily_prize_sol = null;
@@ -264,6 +268,9 @@ function ConfigSection() {
         payload.fixed_daily_prize_sol = Number(fp);
       }
       payload.pot_threshold_sol = Number(draft.pot_threshold_sol);
+      const fpr = draft.fixed_daily_prize_rollat;
+      payload.fixed_daily_prize_rollat = (fpr === "" || fpr === null) ? null : Number(fpr);
+      payload.pot_threshold_rollat = Number(draft.pot_threshold_rollat) || 0;
       payload.min_qualifying_tokens = Number(draft.min_qualifying_tokens);
       payload.streak_bonus_enabled = !!draft.streak_bonus_enabled;
       payload.streak_week_threshold = Number(draft.streak_week_threshold);
@@ -298,6 +305,49 @@ function ConfigSection() {
         <div className="text-white/40 font-mono text-sm py-6">Loading…</div>
       ) : (
         <div className="space-y-4">
+          {/* Prize currency selector — flips display + spin gate between SOL and $ROLLAT. */}
+          <div className="grid md:grid-cols-12 gap-3 items-start border border-gold/20 rounded-sm bg-gold/[0.03] p-4">
+            <div className="md:col-span-5">
+              <div className="font-mono text-[11px] uppercase tracking-widest text-gold">Daily Prize Currency</div>
+              <div className="text-[11px] text-white/40 mt-1">
+                Switches the payout unit for the daily spin. The public site, winner reveal,
+                and Telegram all flip to match.
+              </div>
+            </div>
+            <div className="md:col-span-7 flex gap-2">
+              {[
+                { v: "SOL", label: "SOL" },
+                { v: "ROLLAT", label: "$ROLLAT" },
+              ].map((opt) => {
+                const active = draft.prize_currency === opt.v;
+                return (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => setDraft((d) => ({ ...d, prize_currency: opt.v }))}
+                    className="flex-1 px-4 py-2.5 rounded-sm border font-mono text-[12px] uppercase tracking-widest transition-colors"
+                    style={{
+                      borderColor: active ? "#FFD700" : "#ffffff15",
+                      backgroundColor: active ? "#FFD70022" : "transparent",
+                      color: active ? "#FFD700" : "#ffffff90",
+                    }}
+                    data-testid={`prize-currency-${opt.v}`}
+                  >
+                    {opt.label}
+                    {active && " ✓"}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="md:col-span-12 text-[10px] font-mono text-white/45">
+              Active: <span className="text-gold">{cfg?.prize_currency || "SOL"}</span>
+              {" · "}
+              {(cfg?.prize_currency || "SOL") === "ROLLAT"
+                ? "Spin gated by pot wallet's $ROLLAT balance vs the token threshold below."
+                : "Spin gated by pot wallet's SOL balance vs the SOL threshold below."}
+            </div>
+          </div>
+
           <ConfigField
             label="Fixed Daily Prize (SOL)"
             hint="When set, every spin pays this fixed amount regardless of pot. Leave blank for whole-pot mode."
@@ -315,6 +365,28 @@ function ConfigSection() {
             placeholder="e.g. 1.0"
             currentLabel={`${cfg?.pot_threshold_sol} SOL`}
             defaultLabel={`${defaults?.pot_threshold_sol} SOL`}
+          />
+          <ConfigField
+            label="Fixed Daily Prize ($ROLLAT)"
+            hint="Token amount paid when currency = ROLLAT. Required in that mode (admin transfers manually)."
+            value={draft.fixed_daily_prize_rollat}
+            onChange={(v) => setDraft((d) => ({ ...d, fixed_daily_prize_rollat: v }))}
+            placeholder="e.g. 1000000"
+            currentLabel={cfg?.fixed_daily_prize_rollat == null
+              ? "(not set)"
+              : `${Number(cfg.fixed_daily_prize_rollat).toLocaleString()} $ROLLAT`}
+            defaultLabel={defaults?.fixed_daily_prize_rollat == null
+              ? "(not set)"
+              : `${Number(defaults.fixed_daily_prize_rollat).toLocaleString()} $ROLLAT`}
+          />
+          <ConfigField
+            label="Pot Threshold ($ROLLAT)"
+            hint="Min pot wallet $ROLLAT balance to spin in ROLLAT mode. Below this, the round rolls over."
+            value={draft.pot_threshold_rollat}
+            onChange={(v) => setDraft((d) => ({ ...d, pot_threshold_rollat: v }))}
+            placeholder="e.g. 100000"
+            currentLabel={`${Number(cfg?.pot_threshold_rollat || 0).toLocaleString()} $ROLLAT`}
+            defaultLabel={`${Number(defaults?.pot_threshold_rollat || 0).toLocaleString()} $ROLLAT`}
           />
           <ConfigField
             label="Min Qualifying Tokens"

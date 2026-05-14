@@ -4,6 +4,7 @@ import { Zap, Trophy, ExternalLink } from "lucide-react";
 import { useSpinPhase } from "@/lib/SpinPhaseContext";
 import { useCountdown, pad } from "@/lib/useCountdown";
 import { launchConfetti } from "@/lib/confetti";
+import { formatPrize, formatAmount, PRIZE_UNIT_LABEL } from "@/lib/formatPrize";
 import { SectionLabel } from "./HowItWorks";
 
 const TICKET_COLORS = {
@@ -24,13 +25,19 @@ const fmtSol = (n) =>
 export default function RouletteArena() {
   const { spinState, stats } = useSpinPhase() || {};
   const rawPhase = spinState?.phase || "idle";
+  const currency = stats?.prize_currency || "SOL";
   // Derive awaiting_funds from live pot balance so it shows immediately,
-  // not just after the next 12:00 UTC attempt writes it to the DB.
-  const potBelowPrize =
-    rawPhase === "idle" &&
-    stats?.fixed_prize_sol != null &&
-    stats?.current_pot_sol != null &&
-    stats.current_pot_sol < stats.fixed_prize_sol;
+  // not just after the next 12:00 UTC attempt writes it to the DB. Compare
+  // against whichever balance/threshold pair the active currency uses.
+  const potBelowPrize = currency === "ROLLAT"
+    ? (rawPhase === "idle"
+        && stats?.pot_threshold_rollat != null
+        && stats?.pot_rollat != null
+        && stats.pot_rollat < stats.pot_threshold_rollat)
+    : (rawPhase === "idle"
+        && stats?.fixed_prize_sol != null
+        && stats?.current_pot_sol != null
+        && stats.current_pot_sol < stats.fixed_prize_sol);
   const phase = potBelowPrize ? "awaiting_funds" : rawPhase;
   const t = useCountdown(stats?.next_spin_at);
 
@@ -64,9 +71,18 @@ export default function RouletteArena() {
         </AnimatePresence>
 
         {/* Fixed-prize mode: show "Tonight's Prize" card instead of threshold meter.
-            When stats.fixed_prize_sol is null we revert to the old threshold UI. */}
-        {stats?.fixed_prize_sol != null ? (
-          <TonightsPrize prize={stats.fixed_prize_sol} treasury={stats.current_pot_sol} />
+            When stats.fixed_prize_sol is null we revert to the old threshold UI.
+            In ROLLAT mode, the prize is always fixed (admin-set token amount). */}
+        {currency === "ROLLAT" && stats?.fixed_prize_rollat != null ? (
+          <TonightsPrize
+            prizeLabel={formatAmount(stats.fixed_prize_rollat, "ROLLAT")}
+            treasuryLabel={`${(stats.pot_rollat ?? 0).toLocaleString()} $ROLLAT`}
+          />
+        ) : stats?.fixed_prize_sol != null ? (
+          <TonightsPrize
+            prizeLabel={formatAmount(stats.fixed_prize_sol, "SOL")}
+            treasuryLabel={`${(stats?.current_pot_sol ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SOL`}
+          />
         ) : (
           <PotMeter current={stats?.current_pot_sol} threshold={stats?.pot_threshold_sol} />
         )}
@@ -92,6 +108,10 @@ function PhaseIndicator({ phase }) {
 }
 
 function IdleDisplay({ t, stats, awaitingFunds }) {
+  const currency = stats?.prize_currency || "SOL";
+  const needed = currency === "ROLLAT"
+    ? formatAmount(stats?.pot_threshold_rollat ?? 0, "ROLLAT")
+    : formatAmount(stats?.fixed_prize_sol ?? 0.1, "SOL");
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
       {/* Left: countdown + info */}
@@ -99,7 +119,7 @@ function IdleDisplay({ t, stats, awaitingFunds }) {
         {awaitingFunds && (
           <div className="mb-6 px-5 py-4 rounded-sm border-2 font-mono text-sm font-bold uppercase tracking-widest"
             style={{ borderColor: "#FF3366", backgroundColor: "#FF336615", color: "#FF3366" }}>
-            ⚠ Pot building — needs 0.1 SOL to spin. Buy $ROLLAT to fuel the next round.
+            ⚠ Pot building — needs {needed} to spin. Buy $ROLLAT to fuel the next round.
           </div>
         )}
         <div className="text-[10px] uppercase tracking-[0.3em] font-mono text-white/40 mb-4">
@@ -137,11 +157,15 @@ function IdleDisplay({ t, stats, awaitingFunds }) {
           <div><span className="text-white">{stats?.total_qualified_wallets ?? "—"}</span> wallets qualified</div>
           <div>Round <span className="text-white">#{stats?.spins_completed ? stats.spins_completed + 1 : "—"}</span></div>
           <div>
-            {stats?.fixed_prize_sol != null ? "Prize" : "Pot"}{" "}
+            {currency === "ROLLAT" || stats?.fixed_prize_sol != null ? "Prize" : "Pot"}{" "}
             <span className="text-gold">
-              {stats?.fixed_prize_sol != null
-                ? fmtSol(stats.fixed_prize_sol)
-                : (stats?.current_pot_sol ? `${stats.current_pot_sol} SOL` : "—")}
+              {currency === "ROLLAT"
+                ? (stats?.fixed_prize_rollat != null
+                    ? formatAmount(stats.fixed_prize_rollat, "ROLLAT")
+                    : "—")
+                : stats?.fixed_prize_sol != null
+                  ? fmtSol(stats.fixed_prize_sol)
+                  : (stats?.current_pot_sol ? `${stats.current_pot_sol} SOL` : "—")}
             </span>
           </div>
         </div>
@@ -261,7 +285,8 @@ function WinnerReveal({ winner, stats }) {
 
   if (!winner) return null;
 
-  const shareText = `I just witnessed ${fmtSol(winner.amount_sol)} awarded in @Rollat_online's on-chain roulette 🎰 Round #${winner.round_number} · $ROLLAT`;
+  const prizeDisplay = formatPrize(winner);
+  const shareText = `I just witnessed ${prizeDisplay} awarded in @Rollat_online's on-chain roulette 🎰 Round #${winner.round_number} · $ROLLAT`;
 
   return (
     <>
@@ -300,7 +325,7 @@ function WinnerReveal({ winner, stats }) {
               transition={{ delay: 0.4 }}
               className="font-display font-black text-5xl md:text-6xl gold-text tabular-nums mb-3"
             >
-              {fmtSol(winner.amount_sol)}
+              {prizeDisplay}
             </motion.div>
 
             <div className="font-mono text-sm text-white/40 mb-8">
@@ -342,7 +367,7 @@ function WinnerReveal({ winner, stats }) {
   );
 }
 
-function TonightsPrize({ prize, treasury }) {
+function TonightsPrize({ prizeLabel, treasuryLabel }) {
   return (
     <div className="mt-12 p-5 border border-gold/30 rounded-sm bg-obsidian-900/60 grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div>
@@ -350,7 +375,7 @@ function TonightsPrize({ prize, treasury }) {
           Tonight's Prize
         </div>
         <div className="font-mono font-black text-4xl sm:text-5xl tabular-nums gold-text">
-          {fmtSol(prize)}
+          {prizeLabel}
         </div>
         <div className="font-mono text-[10px] uppercase tracking-widest text-white/40 mt-2">
           Fixed daily payout · winner takes all
@@ -361,7 +386,7 @@ function TonightsPrize({ prize, treasury }) {
           Treasury
         </div>
         <div className="font-mono font-bold text-2xl sm:text-3xl tabular-nums text-white/80">
-          {(treasury ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} SOL
+          {treasuryLabel}
         </div>
         <div className="font-mono text-[10px] uppercase tracking-widest text-white/30 mt-2">
           On-chain · accumulating
