@@ -1,40 +1,31 @@
 import { motion } from "framer-motion";
 import { useSpinPhase } from "@/lib/SpinPhaseContext";
-import { TrendingUp, Coins, Users, Trophy, Radio } from "lucide-react";
+import { useCountdown } from "@/lib/useCountdown";
+import { TrendingUp, Coins, Users, Trophy, Timer } from "lucide-react";
 
 const fmtSol = (n) =>
   `${(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SOL`;
 
-export default function PotTicker() {
-  const { stats, spinState } = useSpinPhase() || {};
-  const rawPhase = spinState?.phase || "idle";
-  const currency = stats?.prize_currency || "SOL";
-  const potBelowPrize = currency !== "ROLLAT"
-    && rawPhase === "idle"
-    && stats?.fixed_prize_sol != null
-    && stats?.current_pot_sol != null
-    && stats.current_pot_sol < stats.fixed_prize_sol;
-  const phase = (currency === "ROLLAT" && rawPhase === "awaiting_funds")
-    ? "idle"
-    : potBelowPrize ? "awaiting_funds" : rawPhase;
+const fmtCompactTime = (t) => {
+  if (!t || t.total <= 0 || t.firing) return "Soon…";
+  const { h, m, s } = t;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+};
 
-  const phaseLabel =
-    phase === "spinning" ? "SPINNING" :
-    phase === "resolved" ? "WINNER" :
-    phase === "awaiting_funds" ? "POT BUILDING" :
-    "IDLE";
-  const phaseAccent =
-    phase === "spinning" ? "crimson" :
-    phase === "resolved" ? "gold" :
-    phase === "awaiting_funds" ? "crimson" :
-    "emerald";
+export default function PotTicker() {
+  const { stats } = useSpinPhase() || {};
+  const t = useCountdown(stats?.next_spin_at);
+  const nextSpinValue = fmtCompactTime(t);
+  const nextSpinAccent = t?.firing ? "crimson" : "emerald";
 
   const items = [
     { icon: Coins, label: "Live Pot", value: fmtSol(stats?.current_pot_sol), accent: "gold", testid: "pot-live" },
     { icon: Trophy, label: "Distributed", value: fmtSol(stats?.total_distributed_sol), accent: "emerald", testid: "pot-distributed" },
     { icon: TrendingUp, label: "Biggest Win", value: fmtSol(stats?.biggest_win_sol), accent: "crimson", testid: "pot-biggest" },
     { icon: Users, label: "Qualified", value: stats?.total_qualified_wallets ?? "—", accent: "gold", testid: "pot-qualified" },
-    { icon: Radio, label: "Round Status", value: phaseLabel, accent: phaseAccent, testid: "pot-status" },
+    { icon: Timer, label: "Next Spin In", value: nextSpinValue, accent: nextSpinAccent, testid: "pot-next-spin" },
   ];
 
   return (

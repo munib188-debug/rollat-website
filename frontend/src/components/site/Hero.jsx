@@ -1,10 +1,91 @@
 import { motion } from "framer-motion";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Sparkles, Copy, Check, Pill, BarChart3 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSpinPhase } from "@/lib/SpinPhaseContext";
 import { useCountdown, pad } from "@/lib/useCountdown";
 import { formatPrize, PRIZE_UNIT_LABEL } from "@/lib/formatPrize";
+import { ROLLAT_MINT, ROLLAT_LINKS, truncateMint } from "@/lib/constants";
+
+const BUY_LINKS = [
+  { name: "Jupiter", letter: "J", url: ROLLAT_LINKS.jupiter, tagline: "Aggregator" },
+  { name: "pump.fun", icon: Pill, url: ROLLAT_LINKS.pumpfun, tagline: "Origin" },
+  { name: "Raydium", letter: "R", url: ROLLAT_LINKS.raydium, tagline: "DEX" },
+  { name: "DexScreener", icon: BarChart3, url: ROLLAT_LINKS.dexscreener, tagline: "Chart" },
+];
+
+function BuyRow() {
+  return (
+    <div className="mt-5 flex flex-wrap items-center gap-2.5" data-testid="hero-buy-row">
+      <span className="text-[10px] uppercase tracking-[0.25em] font-mono text-gold/70 mr-1">
+        Buy $ROLLAT →
+      </span>
+      {BUY_LINKS.map(({ name, letter, icon: Icon, url, tagline }) => (
+        <a
+          key={name}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`${name} · ${tagline}`}
+          aria-label={`Buy $ROLLAT on ${name}`}
+          className="group inline-flex items-center gap-2 px-2.5 h-9 rounded-sm border border-white/15 hover:border-gold/60 bg-obsidian-900/40 hover:bg-gold/5 text-white/70 hover:text-gold transition-colors"
+          data-testid={`hero-buy-${name.toLowerCase().replace(/\W/g, "")}`}
+        >
+          {Icon ? (
+            <Icon className="w-3.5 h-3.5" />
+          ) : (
+            <span className="w-4 h-4 flex items-center justify-center rounded-full border border-current text-[10px] font-black font-mono">
+              {letter}
+            </span>
+          )}
+          <span className="text-[11px] font-mono uppercase tracking-[0.18em] hidden sm:inline">
+            {name}
+          </span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function ContractBadge() {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy(e) {
+    e.preventDefault();
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(ROLLAT_MINT).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <a
+      href={ROLLAT_LINKS.solscan}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={handleCopy}
+      title="Click to copy · right-click to open Solscan"
+      className="inline-flex items-center gap-1.5 px-2 py-1 -my-1 rounded-sm border border-gold/30 hover:border-gold/60 bg-gold/5 hover:bg-gold/10 text-gold transition-colors"
+      data-testid="hero-ca-badge"
+    >
+      <span className="text-[10px] font-mono normal-case tracking-normal">
+        CA: <span className="tabular-nums">{truncateMint()}</span>
+      </span>
+      {copied ? (
+        <Check className="w-3 h-3 text-emerald_neon" />
+      ) : (
+        <Copy className="w-3 h-3 opacity-60 group-hover:opacity-100" />
+      )}
+      {copied && (
+        <span className="text-[10px] font-mono normal-case text-emerald_neon">
+          Copied
+        </span>
+      )}
+    </a>
+  );
+}
 
 export default function Hero() {
   const { stats, spinState } = useSpinPhase() || {};
@@ -152,17 +233,28 @@ export default function Hero() {
             </a>
           </motion.div>
 
+          {/* Buy $ROLLAT — small icon row */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.6 }}
+          >
+            <BuyRow />
+          </motion.div>
+
           {/* Trust bar */}
-          <div className="mt-12 flex flex-wrap items-center gap-x-8 gap-y-3 text-xs text-white/40 font-mono uppercase tracking-widest">
+          <div className="mt-12 flex flex-wrap items-center gap-x-6 gap-y-3 text-xs text-white/40 font-mono uppercase tracking-widest">
             <div className="flex items-center gap-2">
               <Sparkles className="w-3 h-3 text-gold" />
               Switchboard VRF
             </div>
-            <div>·</div>
+            <div className="text-white/20">·</div>
             <div>Solana</div>
-            <div>·</div>
+            <div className="text-white/20">·</div>
+            <ContractBadge />
+            <div className="text-white/20">·</div>
             <div>Audited</div>
-            <div>·</div>
+            <div className="text-white/20">·</div>
             <div>Fair Launch</div>
           </div>
         </div>
