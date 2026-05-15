@@ -29,15 +29,13 @@ export default function RouletteArena() {
   // Derive awaiting_funds from live pot balance so it shows immediately,
   // not just after the next 12:00 UTC attempt writes it to the DB. Compare
   // against whichever balance/threshold pair the active currency uses.
-  const potBelowPrize = currency === "ROLLAT"
-    ? (rawPhase === "idle"
-        && stats?.pot_threshold_rollat != null
-        && stats?.pot_rollat != null
-        && stats.pot_rollat < stats.pot_threshold_rollat)
-    : (rawPhase === "idle"
-        && stats?.fixed_prize_sol != null
-        && stats?.current_pot_sol != null
-        && stats.current_pot_sol < stats.fixed_prize_sol);
+  // In ROLLAT mode there is no accumulating pot — admin sets a fixed prize amount,
+  // so "awaiting_funds" never applies. Only gate in SOL mode.
+  const potBelowPrize = currency !== "ROLLAT"
+    && rawPhase === "idle"
+    && stats?.fixed_prize_sol != null
+    && stats?.current_pot_sol != null
+    && stats.current_pot_sol < stats.fixed_prize_sol;
   const phase = potBelowPrize ? "awaiting_funds" : rawPhase;
   const t = useCountdown(stats?.next_spin_at);
 
