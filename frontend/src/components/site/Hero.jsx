@@ -137,7 +137,7 @@ function RotatingHeadline({ phase }) {
 
   const [line1, line2] = IDLE_HEADLINES[idx];
   return (
-    <div className="h-[3.6em] sm:h-[3.4em] lg:h-[3.2em] overflow-hidden" data-testid="hero-headline">
+    <div className="relative min-h-[7rem] sm:min-h-[8.5rem] lg:min-h-[10rem]" data-testid="hero-headline">
       <AnimatePresence mode="wait">
         <motion.h1
           key={idx}
@@ -145,7 +145,7 @@ function RotatingHeadline({ phase }) {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -24 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
-          className="font-display font-black text-5xl sm:text-6xl lg:text-7xl tracking-tighter leading-[0.92]"
+          className="font-display font-black text-5xl sm:text-6xl lg:text-7xl tracking-tighter leading-[1.02] pb-1"
         >
           <span className="block">{line1}</span>
           <span className="block gold-text">{line2}</span>
@@ -224,7 +224,7 @@ function CTAs() {
     <>
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 mt-4">
         <a
-          href={ROLLAT_LINKS.jupiter}
+          href={ROLLAT_LINKS.pumpfun}
           target="_blank"
           rel="noopener noreferrer"
           data-testid="hero-buy-btn"
@@ -250,7 +250,7 @@ function CTAs() {
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[10px] font-mono uppercase tracking-[0.25em] text-white/40">
         <span className="text-gold/50">also on</span>
-        <a href={ROLLAT_LINKS.pumpfun} target="_blank" rel="noopener noreferrer" className="hover:text-gold transition-colors">pump.fun</a>
+        <a href={ROLLAT_LINKS.jupiter} target="_blank" rel="noopener noreferrer" className="hover:text-gold transition-colors">Jupiter</a>
         <span className="text-white/15">·</span>
         <a href={ROLLAT_LINKS.raydium} target="_blank" rel="noopener noreferrer" className="hover:text-gold transition-colors">Raydium</a>
         <span className="text-white/15">·</span>
