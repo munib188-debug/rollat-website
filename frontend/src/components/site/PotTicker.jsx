@@ -8,12 +8,15 @@ const fmtSol = (n) =>
 export default function PotTicker() {
   const { stats, spinState } = useSpinPhase() || {};
   const rawPhase = spinState?.phase || "idle";
-  const potBelowPrize =
-    rawPhase === "idle" &&
-    stats?.fixed_prize_sol != null &&
-    stats?.current_pot_sol != null &&
-    stats.current_pot_sol < stats.fixed_prize_sol;
-  const phase = potBelowPrize ? "awaiting_funds" : rawPhase;
+  const currency = stats?.prize_currency || "SOL";
+  const potBelowPrize = currency !== "ROLLAT"
+    && rawPhase === "idle"
+    && stats?.fixed_prize_sol != null
+    && stats?.current_pot_sol != null
+    && stats.current_pot_sol < stats.fixed_prize_sol;
+  const phase = (currency === "ROLLAT" && rawPhase === "awaiting_funds")
+    ? "idle"
+    : potBelowPrize ? "awaiting_funds" : rawPhase;
 
   const phaseLabel =
     phase === "spinning" ? "SPINNING" :
