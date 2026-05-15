@@ -1,8 +1,6 @@
 import { Component } from "react";
 import Header from "@/components/site/Header";
 import Hero from "@/components/site/Hero";
-import PotTicker from "@/components/site/PotTicker";
-import PreviousWinner from "@/components/site/PreviousWinner";
 import HowItWorks from "@/components/site/HowItWorks";
 import RouletteArena from "@/components/site/RouletteArena";
 import DevRollArena from "@/components/site/DevRollArena";
@@ -41,8 +39,6 @@ export default function Landing() {
       <Header />
       <main>
         <S name="Hero"><Hero /></S>
-        <S name="PotTicker"><PotTicker /></S>
-        <S name="PreviousWinner"><PreviousWinner /></S>
         <S name="HowItWorks"><HowItWorks /></S>
         <S name="RouletteArena"><RouletteArena /></S>
         <S name="DevRollArena"><DevRollArena /></S>
