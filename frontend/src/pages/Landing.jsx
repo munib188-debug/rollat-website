@@ -4,6 +4,7 @@ import Hero from "@/components/site/Hero";
 import PotTicker from "@/components/site/PotTicker";
 import PreviousWinner from "@/components/site/PreviousWinner";
 import HowItWorks from "@/components/site/HowItWorks";
+import RollatCard from "@/components/site/RollatCard";
 import RouletteArena from "@/components/site/RouletteArena";
 import DevRollArena from "@/components/site/DevRollArena";
 import GuestRollArena from "@/components/site/GuestRollArena";
@@ -44,6 +45,18 @@ export default function Landing() {
         <S name="PotTicker"><PotTicker /></S>
         <S name="PreviousWinner"><PreviousWinner /></S>
         <S name="HowItWorks"><HowItWorks /></S>
+        <S name="RollatCard">
+          <section className="relative py-16 px-6 md:px-12 flex flex-col items-center gap-6" data-testid="rollat-card-section">
+            <div className="text-center mb-2">
+              <div className="text-[10px] uppercase tracking-[0.35em] font-mono text-gold/50 mb-2">Membership</div>
+              <h2 className="font-display font-black text-3xl md:text-4xl tracking-tight text-white">The Rollat Card</h2>
+              <p className="mt-3 text-sm text-white/40 font-mono max-w-xs mx-auto">
+                Hold. Qualify. Get drawn. Every qualified wallet holds one.
+              </p>
+            </div>
+            <RollatCard />
+          </section>
+        </S>
         <S name="RouletteArena"><RouletteArena /></S>
         <S name="DevRollArena"><DevRollArena /></S>
         <S name="GuestRollArena"><GuestRollArena /></S>
