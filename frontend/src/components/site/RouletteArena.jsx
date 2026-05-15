@@ -30,13 +30,16 @@ export default function RouletteArena() {
   // not just after the next 12:00 UTC attempt writes it to the DB. Compare
   // against whichever balance/threshold pair the active currency uses.
   // In ROLLAT mode there is no accumulating pot — admin sets a fixed prize amount,
-  // so "awaiting_funds" never applies. Only gate in SOL mode.
+  // so "awaiting_funds" never applies. Also neutralise it if the backend wrote it
+  // to the DB during a previous ROLLAT-mode spin attempt.
   const potBelowPrize = currency !== "ROLLAT"
     && rawPhase === "idle"
     && stats?.fixed_prize_sol != null
     && stats?.current_pot_sol != null
     && stats.current_pot_sol < stats.fixed_prize_sol;
-  const phase = potBelowPrize ? "awaiting_funds" : rawPhase;
+  const phase = (currency === "ROLLAT" && rawPhase === "awaiting_funds")
+    ? "idle"
+    : potBelowPrize ? "awaiting_funds" : rawPhase;
   const t = useCountdown(stats?.next_spin_at);
 
   return (
